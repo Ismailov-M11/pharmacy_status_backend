@@ -19,7 +19,12 @@ async function getOrCreatePharmacyStatus(pharmacy_id) {
     };
   }
 
-  return result.rows[0];
+  // Convert snake_case to camelCase for frontend
+  const row = result.rows[0];
+  return {
+    ...row,
+    brandedPacket: row.branded_packet
+  };
 }
 
 async function updatePharmacyStatus(pharmacy_id, field, new_value) {
@@ -50,7 +55,13 @@ async function updatePharmacyStatus(pharmacy_id, field, new_value) {
   }
 
   const result = await db.query(query, [pharmacy_id, new_value]);
-  return result.rows[0];
+
+  // Convert snake_case to camelCase for frontend
+  const row = result.rows[0];
+  return {
+    ...row,
+    brandedPacket: row.branded_packet
+  };
 }
 
 module.exports = {
