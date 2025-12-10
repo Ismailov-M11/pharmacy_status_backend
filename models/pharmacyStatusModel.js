@@ -23,14 +23,16 @@ async function getOrCreatePharmacyStatus(pharmacy_id) {
 }
 
 async function updatePharmacyStatus(pharmacy_id, field, new_value) {
+  // Use UPSERT: INSERT if not exists, UPDATE if exists
   const query = `
-    UPDATE pharmacy_status
-    SET "${field}" = $1, updated_at = NOW()
-    WHERE pharmacy_id = $2
+    INSERT INTO pharmacy_status (pharmacy_id, ${field}, updated_at)
+    VALUES ($1, $2, NOW())
+    ON CONFLICT (pharmacy_id)
+    DO UPDATE SET ${field} = $2, updated_at = NOW()
     RETURNING *;
   `;
 
-  const result = await db.query(query, [new_value, pharmacy_id]);
+  const result = await db.query(query, [pharmacy_id, new_value]);
   return result.rows[0];
 }
 
