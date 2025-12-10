@@ -23,12 +23,15 @@ async function getOrCreatePharmacyStatus(pharmacy_id) {
 }
 
 async function updatePharmacyStatus(pharmacy_id, field, new_value) {
+  // Convert camelCase to snake_case for database column names
+  const dbField = field === 'brandedPacket' ? 'branded_packet' : field;
+
   // Use UPSERT: INSERT if not exists, UPDATE if exists
   const query = `
-    INSERT INTO pharmacy_status (pharmacy_id, ${field}, updated_at)
+    INSERT INTO pharmacy_status (pharmacy_id, ${dbField}, updated_at)
     VALUES ($1, $2, NOW())
     ON CONFLICT (pharmacy_id)
-    DO UPDATE SET ${field} = $2, updated_at = NOW()
+    DO UPDATE SET ${dbField} = $2, updated_at = NOW()
     RETURNING *;
   `;
 
