@@ -27,13 +27,27 @@ async function updatePharmacyStatus(pharmacy_id, field, new_value) {
   const dbField = field === 'brandedPacket' ? 'branded_packet' : field;
 
   // Use UPSERT: INSERT if not exists, UPDATE if exists
-  const query = `
-    INSERT INTO pharmacy_status (pharmacy_id, ${dbField}, updated_at)
-    VALUES ($1, $2, NOW())
-    ON CONFLICT (pharmacy_id)
-    DO UPDATE SET ${dbField} = $2, updated_at = NOW()
-    RETURNING *;
-  `;
+  // We need to handle both fields separately to avoid SQL injection
+  let query;
+  if (dbField === 'training') {
+    query = `
+      INSERT INTO pharmacy_status (pharmacy_id, training, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (pharmacy_id)
+      DO UPDATE SET training = $2, updated_at = NOW()
+      RETURNING *;
+    `;
+  } else if (dbField === 'branded_packet') {
+    query = `
+      INSERT INTO pharmacy_status (pharmacy_id, branded_packet, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (pharmacy_id)
+      DO UPDATE SET branded_packet = $2, updated_at = NOW()
+      RETURNING *;
+    `;
+  } else {
+    throw new Error(`Invalid field: ${field}`);
+  }
 
   const result = await db.query(query, [pharmacy_id, new_value]);
   return result.rows[0];
