@@ -27,20 +27,20 @@ async function updatePharmacyStatus(pharmacy_id, field, new_value) {
   const dbField = field === 'brandedPacket' ? 'branded_packet' : field;
 
   // Use UPSERT: INSERT if not exists, UPDATE if exists
-  // We need to handle both fields separately to avoid SQL injection
+  // Set both fields with defaults to avoid NULL values
   let query;
   if (dbField === 'training') {
     query = `
-      INSERT INTO pharmacy_status (pharmacy_id, training, updated_at)
-      VALUES ($1, $2, NOW())
+      INSERT INTO pharmacy_status (pharmacy_id, training, branded_packet, updated_at)
+      VALUES ($1, $2, FALSE, NOW())
       ON CONFLICT (pharmacy_id)
       DO UPDATE SET training = $2, updated_at = NOW()
       RETURNING *;
     `;
   } else if (dbField === 'branded_packet') {
     query = `
-      INSERT INTO pharmacy_status (pharmacy_id, branded_packet, updated_at)
-      VALUES ($1, $2, NOW())
+      INSERT INTO pharmacy_status (pharmacy_id, training, branded_packet, updated_at)
+      VALUES ($1, FALSE, $2, NOW())
       ON CONFLICT (pharmacy_id)
       DO UPDATE SET branded_packet = $2, updated_at = NOW()
       RETURNING *;
