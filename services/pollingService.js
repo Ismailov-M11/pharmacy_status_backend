@@ -38,7 +38,7 @@ async function fetchExternalPharmacies(token) {
         }, {
             headers: { Authorization: `Bearer ${token}` }
         });
-        return response.data.object || [];
+        return response.data.payload.list || [];
     } catch (error) {
         console.error("Polling Fetch Failed:", error.message);
         return [];
