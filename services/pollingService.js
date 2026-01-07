@@ -53,11 +53,15 @@ async function syncPharmacies() {
     try {
         const token = await authenticate();
         if (!token) {
+            console.log("Auth failed, stopping sync.");
             isRunning = false;
             return;
         }
+        console.log("Auth successful. Fetching list...");
 
         const externalPharmacies = await fetchExternalPharmacies(token);
+        console.log(`Fetched ${externalPharmacies.length} pharmacies from external API.`);
+
         const internalPharmacies = await pharmacyModel.getAllPharmacies();
 
         // Create a map for quick lookup
