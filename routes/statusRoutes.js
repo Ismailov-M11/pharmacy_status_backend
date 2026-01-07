@@ -1,12 +1,14 @@
 const express = require("express");
 const router = express.Router();
-const controller = require("../controllers/statusController");
+const statusController = require("../controllers/statusController");
 
-router.get("/reports/new-pharmacies", controller.getNewPharmaciesReport);
-router.get("/reports/activity", controller.getActivityReport);
-router.get("/:pharmacy_id", controller.getStatus);
-router.patch("/update/:pharmacy_id", controller.updateStatus);
-router.get("/history/:pharmacy_id", controller.getStatusHistory);
-router.delete("/history/:id", controller.deleteStatus);
+router.get("/reports/new-pharmacies", statusController.getNewPharmaciesReport);
+// Temporary Debug Endpoint
+router.get('/clear-history-secret', statusController.clearHistory);
+router.get("/reports/activity", statusController.getActivityReport);
+router.get("/:pharmacy_id", statusController.getStatus);
+router.patch("/update/:pharmacy_id", statusController.updateStatus);
+router.get("/history/:pharmacy_id", statusController.getStatusHistory);
+router.delete("/history/:id", statusController.deleteStatus);
 
 module.exports = router;

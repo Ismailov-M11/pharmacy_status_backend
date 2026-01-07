@@ -179,9 +179,19 @@ async function getActivityReport(req, res) {
     });
   } catch (error) {
     console.error("Error in getActivityReport:", error);
-    res.status(500).json({ error: "Failed to fetch activity report" });
+    res.status(500).json({ status: "Error", message: error.message });
   }
 }
+
+exports.clearHistory = async (req, res) => {
+  try {
+    const db = require('../db');
+    await db.query("DELETE FROM pharmacy_events");
+    res.json({ status: "Ok", message: "History cleared successfully!" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 module.exports = {
   getStatus,
