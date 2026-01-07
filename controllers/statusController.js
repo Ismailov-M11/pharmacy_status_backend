@@ -11,25 +11,63 @@ async function updateStatus(req, res) {
   const { pharmacy_id } = req.params;
   const { update_type, new_value, comment, changed_by } = req.body;
 
-  if (!["training", "brandedPacket"].includes(update_type)) {
-    return res.status(400).json({ error: "Invalid update type" });
+  // 1. Handle Training / Branded Packet (Legacy/Existing Logic)
+  if (["training", "brandedPacket"].includes(update_type)) {
+    const current = await pharmacy.getOrCreatePharmacyStatus(pharmacy_id);
+    const old_value = current[update_type];
+
+    await history.addHistory(
+      pharmacy_id,
+      update_type,
+      old_value,
+      new_value,
+      comment,
+      changed_by
+    );
+
+    const updated = await pharmacy.updatePharmacyStatus(pharmacy_id, update_type, new_value);
+    return res.json(updated);
   }
 
-  const current = await pharmacy.getOrCreatePharmacyStatus(pharmacy_id);
-  const old_value = current[update_type];
+  // 2. Handle is_active (Strict Logic Rules)
+  if (update_type === "is_active") {
+    const current = await pharmacy.getOrCreatePharmacyStatus(pharmacy_id);
+    const was_active = current.is_active;
 
-  await history.addHistory(
-    pharmacy_id,
-    update_type,
-    old_value,
-    new_value,
-    comment,
-    changed_by
-  );
+    // Proceed only if value actually changed
+    if (was_active !== new_value) {
 
-  const updated = await pharmacy.updatePharmacyStatus(pharmacy_id, update_type, new_value);
+      // Strict Logic Implementation
+      const { onboarding_started_at, onboarded_at } = current;
+      const source = changed_by.includes("system") ? "system" : "manual"; // heuristic or pass source
 
-  res.json(updated);
+      // Rule 1: First Deactivation = Start Onboarding
+      if (new_value === false && !onboarding_started_at) {
+        await pharmacy.updatePharmacyTimestamp(pharmacy_id, 'onboarding_started_at');
+        await pharmacy.logActivityEvent(pharmacy_id, 'DEACTIVATED', source, { comment });
+      }
+
+      // Rule 2: First Activation After Start = Onboarded (New Pharmacy)
+      else if (new_value === true && onboarding_started_at && !onboarded_at) {
+        await pharmacy.updatePharmacyTimestamp(pharmacy_id, 'onboarded_at');
+        await pharmacy.logActivityEvent(pharmacy_id, 'ACTIVATED', source, { comment }); // Also active event? Yes user said "с этого момента аптека участвует"
+      }
+
+      // Rule 3: Regular Activity (Only if onboarding started)
+      else if (onboarding_started_at) {
+        const type = new_value ? 'ACTIVATED' : 'DEACTIVATED';
+        await pharmacy.logActivityEvent(pharmacy_id, type, source, { comment });
+      }
+
+      // Finally update the status itself
+      const updated = await pharmacy.updatePharmacyStatus(pharmacy_id, 'is_active', new_value);
+      return res.json(updated);
+    }
+
+    return res.json(current); // No change
+  }
+
+  return res.status(400).json({ error: "Invalid update type" });
 }
 
 async function getStatusHistory(req, res) {
@@ -76,7 +114,7 @@ async function getNewPharmaciesReport(req, res) {
         value: diffValue,
         percent: diffPercent
       },
-      items: currentPeriod.items
+      items: currentPeriod.items // Contains onboardedAt
     });
   } catch (error) {
     console.error("Error in getNewPharmaciesReport:", error);
@@ -87,24 +125,17 @@ async function getNewPharmaciesReport(req, res) {
 async function getActivityReport(req, res) {
   try {
     const { from, to } = req.query;
-    const events = await history.getHistoryByDateRange(from, to);
-
-    const formattedEvents = events.map(event => ({
-      id: event.id,
-      changeDatetime: event.changed_at,
-      type: event.new_value ? 'ACTIVATED' : 'DEACTIVATED', // Assuming boolean maps to this
-      source: event.changed_by.includes('system') ? 'system' : 'manual', // Simple heuristic
-      currentStatus: event.new_value ? 'active' : 'inactive'
-    }));
+    // Uses new table pharmacy_activity_events
+    const events = await pharmacy.getActivityEventsByDateRange(from, to);
 
     const summary = {
-      activated: formattedEvents.filter(e => e.type === 'ACTIVATED').length,
-      deactivated: formattedEvents.filter(e => e.type === 'DEACTIVATED').length
+      activated: events.filter(e => e.type === 'ACTIVATED').length,
+      deactivated: events.filter(e => e.type === 'DEACTIVATED').length
     };
 
     res.json({
       summary,
-      events: formattedEvents
+      events
     });
   } catch (error) {
     console.error("Error in getActivityReport:", error);

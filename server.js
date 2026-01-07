@@ -47,6 +47,8 @@ async function initializeDatabase() {
       /* Migrate/Add new columns safely */
       ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
       ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS onboarding_started_at TIMESTAMP NULL;
+      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS onboarded_at TIMESTAMP NULL;
 
       /* Cleanup: Drop redundant columns (data now comes from external API) */
       ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS name;
@@ -70,6 +72,21 @@ async function initializeDatabase() {
         changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         comment TEXT
       );
+    `);
+
+    // Create pharmacy_activity_events table (New Strict Logic)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pharmacy_activity_events (
+        id SERIAL PRIMARY KEY,
+        pharmacy_id VARCHAR(50) NOT NULL,
+        event_type VARCHAR(20) NOT NULL,
+        event_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        source VARCHAR(20) NOT NULL,
+        meta JSONB NULL
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_activity_events_time ON pharmacy_activity_events(event_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_events_pid_time ON pharmacy_activity_events(pharmacy_id, event_at DESC);
     `);
 
     console.log('Database tables ready!');
