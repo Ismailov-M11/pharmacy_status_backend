@@ -6,6 +6,11 @@ const STATUS_API_URL = process.env.STATUS_API_URL || 'https://api.example.com'; 
 const API_LOGIN = process.env.EXTERNAL_API_LOGIN;
 const API_PASSWORD = process.env.EXTERNAL_API_PASSWORD;
 
+// Helper to check if date is valid/present
+function processDate(d) {
+    return d && new Date(d).getTime() > 0;
+}
+
 let isRunning = false;
 let pollingInterval = null;
 
