@@ -120,11 +120,45 @@ async function getActivityEventsByDateRange(fromDate, toDate) {
   }));
 }
 
+async function getAllPharmacies() {
+  const result = await db.query("SELECT * FROM pharmacy_status");
+  return result.rows.map(row => ({
+    ...row,
+    brandedPacket: row.branded_packet,
+    last_active: row.last_active,
+    first_deactivated_at: row.first_deactivated_at,
+    first_trained_activation_at: row.first_trained_activation_at
+  }));
+}
+
+async function updatePollingState(pharmacy_id, is_active, first_deactivated_at, first_trained_activation_at) {
+  const query = `
+    INSERT INTO pharmacy_status (
+      pharmacy_id, last_active, first_deactivated_at, first_trained_activation_at, updated_at
+    )
+    VALUES ($1, $2, $3, $4, NOW())
+    ON CONFLICT (pharmacy_id)
+    DO UPDATE SET 
+      last_active = $2,
+      first_deactivated_at = $3,
+      first_trained_activation_at = $4,
+      updated_at = NOW()
+    RETURNING *;
+  `;
+  await db.query(query, [pharmacy_id, is_active, first_deactivated_at, first_trained_activation_at]);
+}
+
+// Alias for polling service compatibility
+const logEvent = logActivityEvent;
+
 module.exports = {
   getOrCreatePharmacyStatus,
   updatePharmacyStatus,
   updatePharmacyTimestamp,
   logActivityEvent,
+  logEvent, // Export alias
   getPharmaciesByDateRange,
-  getActivityEventsByDateRange
+  getActivityEventsByDateRange,
+  getAllPharmacies,
+  updatePollingState
 };
