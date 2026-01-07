@@ -24,13 +24,7 @@ async function deleteHistory(id) {
 async function getHistoryByDateRange(fromDate, toDate) {
   const query = `
     SELECT 
-      sh.*, 
-      ps.name as pharmacy_name, 
-      ps.address, 
-      ps.district, 
-      ps.phone, 
-      ps.responsible_phone,
-      ps.code
+      sh.*
     FROM status_history sh
     LEFT JOIN pharmacy_status ps ON sh.pharmacy_id = ps.pharmacy_id
     WHERE sh.changed_at >= $1 AND sh.changed_at <= $2

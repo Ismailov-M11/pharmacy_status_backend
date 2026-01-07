@@ -61,13 +61,6 @@ async function setupDatabase() {
 
     // Add new columns if they don't exist
     const columnsToAdd = [
-      "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS name VARCHAR(255)",
-      "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS address TEXT",
-      "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS district VARCHAR(100)",
-      "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS phone VARCHAR(50)",
-      "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS responsible_phone VARCHAR(50)",
-      "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS landmark TEXT",
-      "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS code VARCHAR(50)",
       "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
       "ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE"
     ];

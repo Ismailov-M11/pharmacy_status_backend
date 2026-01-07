@@ -45,15 +45,17 @@ async function initializeDatabase() {
       );
 
       /* Migrate/Add new columns safely */
-      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS name VARCHAR(255);
-      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS address TEXT;
-      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS district VARCHAR(100);
-      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
-      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS responsible_phone VARCHAR(50);
-      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS landmark TEXT;
-      ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS code VARCHAR(50);
       ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
       ALTER TABLE pharmacy_status ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+
+      /* Cleanup: Drop redundant columns (data now comes from external API) */
+      ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS name;
+      ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS address;
+      ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS district;
+      ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS phone;
+      ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS responsible_phone;
+      ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS landmark;
+      ALTER TABLE pharmacy_status DROP COLUMN IF EXISTS code;
     `);
 
     // Create status_history table

@@ -76,9 +76,7 @@ async function getPharmaciesByDateRange(fromDate, toDate) {
     ...row,
     brandedPacket: row.branded_packet,
     onboardedAt: row.created_at,
-    currentStatus: row.is_active ? 'active' : 'inactive',
-    pharmacyName: row.name,
-    responsiblePhone: row.responsible_phone
+    currentStatus: row.is_active ? 'active' : 'inactive'
   }));
 }
 

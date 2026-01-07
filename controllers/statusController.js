@@ -92,12 +92,6 @@ async function getActivityReport(req, res) {
     const formattedEvents = events.map(event => ({
       id: event.id,
       changeDatetime: event.changed_at,
-      code: event.code || 'N/A', // Assuming code comes from joined pharmacy_status
-      pharmacyName: event.pharmacy_name || 'Unknown',
-      address: event.address,
-      district: event.district,
-      phone: event.phone,
-      responsiblePhone: event.responsible_phone,
       type: event.new_value ? 'ACTIVATED' : 'DEACTIVATED', // Assuming boolean maps to this
       source: event.changed_by.includes('system') ? 'system' : 'manual', // Simple heuristic
       currentStatus: event.new_value ? 'active' : 'inactive'
