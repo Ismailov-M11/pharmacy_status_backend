@@ -156,7 +156,7 @@ async function syncPharmacies() {
 
 // Cooldown to prevent spamming external API (e.g. 30 seconds)
 let lastSyncTime = 0;
-const COOLDOWN_MS = 30000;
+const COOLDOWN_MS = 1000;
 
 async function triggerSyncSafely() {
     const now = Date.now();
