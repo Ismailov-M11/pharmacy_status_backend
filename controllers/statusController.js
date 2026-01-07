@@ -132,7 +132,7 @@ async function getActivityReport(req, res) {
 
     // Trigger sync if needed (with cooldown logic inside service)
     // We await it so the user sees fresh data immediately
-    await pollingService.triggerSync();
+    const syncStats = await pollingService.triggerSync();
 
     // Uses new table pharmacy_events
     const rawEvents = await pharmacy.getActivityEventsByDateRange(from, to);
@@ -175,7 +175,8 @@ async function getActivityReport(req, res) {
         net: activatedCount - deactivatedCount
       },
       chart: chart,
-      events: events
+      events: events,
+      debug: syncStats // TEMPORARY DEBUG
     });
   } catch (error) {
     console.error("Error in getActivityReport:", error);
