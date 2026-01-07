@@ -20,9 +20,20 @@ async function authenticate() {
             login: API_LOGIN,
             password: API_PASSWORD
         });
-        return response.data.token;
+
+        // Correct path based on frontend LoginResponse interface
+        const token = response.data?.payload?.token?.token;
+
+        if (!token) {
+            console.error("Auth response missing token. Structure:", JSON.stringify(response.data).substring(0, 200));
+            return null;
+        }
+        return token;
     } catch (error) {
         console.error("Polling Auth Failed:", error.message);
+        if (error.response) {
+            console.error("Auth Response Data:", JSON.stringify(error.response.data));
+        }
         return null;
     }
 }
