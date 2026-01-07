@@ -154,9 +154,28 @@ async function syncPharmacies() {
     }
 }
 
-// Helper to check if date is valid/present
-function processDate(d) {
-    return d && new Date(d).getTime() > 0;
+// Cooldown to prevent spamming external API (e.g. 30 seconds)
+let lastSyncTime = 0;
+const COOLDOWN_MS = 30000;
+
+async function triggerSyncSafely() {
+    const now = Date.now();
+    if (isRunning) {
+        console.log("Sync already running, skipping trigger.");
+        return;
+    }
+    if (now - lastSyncTime < COOLDOWN_MS) {
+        console.log(`Sync cooldown active (` + ((COOLDOWN_MS - (now - lastSyncTime)) / 1000).toFixed(1) + `s remaining). Skipping.`);
+        return;
+    }
+
+    // Update timestamp before starting to prevent race conditions roughly
+    lastSyncTime = now;
+
+    // Run sync but don't await the whole process if used in background, 
+    // BUT for "Sync on Request" user wants fresh data. 
+    // We will await it in the controller, so return the promise here.
+    return syncPharmacies();
 }
 
 function startPolling() {
@@ -168,4 +187,4 @@ function startPolling() {
     console.log("Polling service scheduled (every 30m)");
 }
 
-module.exports = { startPolling };
+module.exports = { startPolling, triggerSync: triggerSyncSafely };

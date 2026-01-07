@@ -1,5 +1,6 @@
 const pharmacy = require("../models/pharmacyStatusModel");
 const history = require("../models/statusHistoryModel");
+const pollingService = require("../services/pollingService"); // Import service
 
 async function getStatus(req, res) {
   const { pharmacy_id } = req.params;
@@ -128,6 +129,11 @@ async function getNewPharmaciesReport(req, res) {
 async function getActivityReport(req, res) {
   try {
     const { from, to } = req.query;
+
+    // Trigger sync if needed (with cooldown logic inside service)
+    // We await it so the user sees fresh data immediately
+    await pollingService.triggerSync();
+
     // Uses new table pharmacy_events
     const rawEvents = await pharmacy.getActivityEventsByDateRange(from, to);
 
