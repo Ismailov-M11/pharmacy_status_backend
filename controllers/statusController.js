@@ -183,7 +183,7 @@ async function getActivityReport(req, res) {
   }
 }
 
-exports.clearHistory = async (req, res) => {
+async function clearHistory(req, res) {
   try {
     const db = require('../db');
     await db.query("DELETE FROM pharmacy_events");
@@ -191,7 +191,7 @@ exports.clearHistory = async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-};
+}
 
 module.exports = {
   getStatus,
