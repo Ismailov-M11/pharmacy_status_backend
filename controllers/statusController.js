@@ -199,5 +199,6 @@ module.exports = {
   getStatusHistory,
   deleteStatus,
   getNewPharmaciesReport,
-  getActivityReport
+  getActivityReport,
+  clearHistory // Add explicit export
 };
