@@ -15,21 +15,28 @@ async function getOrCreatePharmacyStatus(pharmacy_id) {
     return {
       pharmacy_id,
       training: false,
-      brandedPacket: false
+      brandedPacket: false,
+      last_active: true // default
     };
   }
 
-  // Convert snake_case to camelCase for frontend
+  // Convert snake_case to camelCase for frontend where needed
   const row = result.rows[0];
   return {
     ...row,
-    brandedPacket: row.branded_packet
+    brandedPacket: row.branded_packet,
+    is_active: row.last_active, // Compatibility alias for controller logic
+    onboarding_started_at: row.first_deactivated_at, // Compatibility alias
+    onboarded_at: row.first_trained_activation_at // Compatibility alias
   };
 }
 
 async function updatePharmacyStatus(pharmacy_id, field, new_value) {
   // Convert camelCase to snake_case for database column names
-  const dbField = field === 'brandedPacket' ? 'branded_packet' : field;
+  let dbField = field;
+  if (field === 'brandedPacket') dbField = 'branded_packet';
+  // Map legacy fields to new schema if strict logic uses them
+  if (field === 'is_active') dbField = 'last_active';
 
   // Use UPSERT: INSERT if not exists, UPDATE if exists
   const query = `
@@ -40,27 +47,29 @@ async function updatePharmacyStatus(pharmacy_id, field, new_value) {
     RETURNING *;
   `;
 
-  // Note: For is_active or timestamps, we might need to preserve other fields, 
-  // but ON CONFLICT ... DO UPDATE only touches the specified field + updated_at. 
-  // The INSERT case implies other fields get defaults. This works.
-
   try {
     const result = await db.query(query, [pharmacy_id, new_value]);
     const row = result.rows[0];
     return {
       ...row,
-      brandedPacket: row.branded_packet
+      brandedPacket: row.branded_packet,
+      // map back to old prop for potential legacy compatibility if needed, but better use new names
+      last_active: row.last_active
     };
   } catch (e) {
-    // If column doesn't exist or other error
     throw e;
   }
 }
 
 async function updatePharmacyTimestamp(pharmacy_id, field) {
+  // Map old field request to new column
+  let column = field;
+  if (field === 'onboarding_started_at') column = 'first_deactivated_at';
+  if (field === 'onboarded_at') column = 'first_trained_activation_at';
+
   const query = `
     UPDATE pharmacy_status 
-    SET ${field} = NOW(), updated_at = NOW()
+    SET ${column} = NOW(), updated_at = NOW()
     WHERE pharmacy_id = $1
     RETURNING *
   `;
@@ -69,7 +78,7 @@ async function updatePharmacyTimestamp(pharmacy_id, field) {
 
 async function logActivityEvent(pharmacy_id, event_type, source, meta = null) {
   const query = `
-    INSERT INTO pharmacy_activity_events (pharmacy_id, event_type, source, meta)
+    INSERT INTO pharmacy_events (pharmacy_id, event_type, source, meta)
     VALUES ($1, $2, $3, $4)
     RETURNING *
   `;
@@ -77,27 +86,26 @@ async function logActivityEvent(pharmacy_id, event_type, source, meta = null) {
 }
 
 async function getPharmaciesByDateRange(fromDate, toDate) {
-  // Use onboarded_at for "New Pharmacies" report
+  // Use first_trained_activation_at for "New Pharmacies" report
   const query = `
     SELECT * FROM pharmacy_status 
-    WHERE onboarded_at >= $1 AND onboarded_at <= $2
-    ORDER BY onboarded_at DESC
+    WHERE first_trained_activation_at >= $1 AND first_trained_activation_at <= $2
+    ORDER BY first_trained_activation_at DESC
   `;
   const result = await db.query(query, [fromDate, toDate]);
 
   return result.rows.map(row => ({
     ...row,
     brandedPacket: row.branded_packet,
-    // Return onboardedAt for the report
-    onboardedAt: row.onboarded_at,
-    currentStatus: row.is_active ? 'active' : 'inactive'
+    onboardedAt: row.first_trained_activation_at,
+    currentStatus: row.last_active ? 'active' : 'inactive'
   }));
 }
 
 async function getActivityEventsByDateRange(fromDate, toDate) {
   const query = `
-    SELECT e.*, p.is_active as current_status
-    FROM pharmacy_activity_events e
+    SELECT e.*, p.last_active as current_status
+    FROM pharmacy_events e
     LEFT JOIN pharmacy_status p ON e.pharmacy_id = p.pharmacy_id
     WHERE e.event_at >= $1 AND e.event_at <= $2
     ORDER BY e.event_at DESC
