@@ -166,11 +166,9 @@ async function syncPharmacies() {
         }
 
         console.log(`Polling Complete. Checked: ${stats.checked}, Events: ${stats.events}`);
-        return stats; // Return stats for debug
 
     } catch (error) {
         console.error("Sync Error:", error);
-        return { error: error.message };
     } finally {
         isRunning = false;
     }

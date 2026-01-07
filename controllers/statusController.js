@@ -175,8 +175,7 @@ async function getActivityReport(req, res) {
         net: activatedCount - deactivatedCount
       },
       chart: chart,
-      events: events,
-      debug: syncStats // TEMPORARY DEBUG
+      events: events
     });
   } catch (error) {
     console.error("Error in getActivityReport:", error);
