@@ -16,8 +16,8 @@ async function authenticate() {
     }
 
     try {
-        const response = await axios.post(`${STATUS_API_URL}/auth/login`, {
-            phone: API_LOGIN,
+        const response = await axios.post(`${STATUS_API_URL}/auth/admin-login`, {
+            login: API_LOGIN,
             password: API_PASSWORD
         });
         return response.data.token;
