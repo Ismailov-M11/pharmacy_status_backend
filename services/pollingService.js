@@ -45,18 +45,33 @@ async function authenticate() {
 
 async function fetchExternalPharmacies(token) {
     try {
-        // Assuming the API supports a large size or pagination loop. 
-        // Using size=10000 based on usage in reportsApi.ts
+        // Market List
         const response = await axios.post(`${STATUS_API_URL}/market/list`, {
             page: 0,
             size: 10000,
-            active: null // active: null usually means "all" in this API logic based on reportsApi.ts
+            active: null
         }, {
             headers: { Authorization: `Bearer ${token}` }
         });
         return response.data.payload.list || [];
     } catch (error) {
-        console.error("Polling Fetch Failed:", error.message);
+        console.error("Polling Fetch Market Failed:", error.message);
+        return [];
+    }
+}
+
+async function fetchExternalLeads(token) {
+    try {
+        // Lead List
+        const response = await axios.post(`${STATUS_API_URL}/lead/list`, {
+            page: 0,
+            size: 10000
+        }, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        return response.data.payload.list || [];
+    } catch (error) {
+        console.error("Polling Fetch Leads Failed:", error.message);
         return [];
     }
 }
@@ -73,10 +88,21 @@ async function syncPharmacies() {
             isRunning = false;
             return;
         }
-        console.log("Auth successful. Fetching list...");
+        console.log("Auth successful. Fetching lists...");
 
-        const externalPharmacies = await fetchExternalPharmacies(token);
-        console.log(`Fetched ${externalPharmacies.length} pharmacies from external API.`);
+        // Fetch both lists in parallel
+        const [marketList, leadList] = await Promise.all([
+            fetchExternalPharmacies(token),
+            fetchExternalLeads(token)
+        ]);
+
+        console.log(`Fetched ${marketList.length} market items and ${leadList.length} leads.`);
+
+        // Filter leads that are already converted (status === 'CONVERTED')
+        // According to requirements: converted leads are already in marketList, so we skip them in leadList
+        const activeLeads = leadList.filter(l => l.status !== 'CONVERTED');
+
+        console.log(`Filtered down to ${activeLeads.length} non-converted leads.`);
 
         const internalPharmacies = await pharmacyModel.getAllPharmacies();
 
@@ -86,83 +112,25 @@ async function syncPharmacies() {
 
         let stats = { checked: 0, events: 0 };
 
-        for (const extP of externalPharmacies) {
-            const pharmacyId = String(extP.id);
-            const isExternalActive = extP.active; // true | false
+        // Process Market List (the main active/inactive pharmacies)
+        for (const item of marketList) {
+            await processPharmacyItem(item, internalMap, stats, true);
+        }
 
-            const internalState = internalMap.get(pharmacyId) || {
-                pharmacy_id: pharmacyId,
-                last_active: true, // Default heuristic: new pharmacies start 'active' in external system usually? 
-                // Spec says "True -> False: Set first_deactivated_at". 
-                // If it's new and active, we effectively treat it as previously active (or just ignore until deactivation).
-                first_deactivated_at: null,
-                first_trained_activation_at: null
-            };
+        // Process Lead List (treated as inactive/potential pharmacies)
+        // explicitly set 'active' field to false for leads if it doesn't exist, 
+        // to ensure they are treated as inactive by default logic.
+        for (const item of activeLeads) {
+            // Leads usually don't have an 'active' boolean at root level like market items might.
+            // We force it to false or whatever the logic dictates.
+            // Requirement: "show them via market/list", but for leads we just want to list them.
+            // The prompt implies we just merge them. 
+            // If a lead becomes ACTIVE it likely moves to market list and becomes CONVERTED.
+            // So a non-converted lead is inherently INACTIVE in the context of "Pharmacy Status".
 
-            let newLastActive = internalState.last_active;
-            let newFirstDeactivated = internalState.first_deactivated_at;
-            let newFirstTrained = internalState.first_trained_activation_at;
-
-            // Rule: Compare States
-            // Note: internalState.last_active comes from DB boolean
-
-            const wasActive = internalState.last_active;
-            const isNowActive = isExternalActive;
-
-            if (wasActive !== isNowActive) {
-                // Change detected!
-
-                // CASE 1: first_deactivated_at IS NULL
-                if (!processDate(newFirstDeactivated)) { // Check if null/invalid
-                    if (wasActive === true && isNowActive === false) {
-                        // True -> False: Initial Deactivation
-                        newFirstDeactivated = new Date();
-                        await pharmacyModel.logEvent(pharmacyId, 'DEACTIVATED', 'polling');
-                        stats.events++;
-                    }
-                    // Else: Do nothing (e.g. False -> True before first deactivation is ignored)
-                }
-                // CASE 2: first_deactivated_at IS NOT NULL
-                else {
-                    if (wasActive === false && isNowActive === true) {
-                        // False -> True: Activation
-                        await pharmacyModel.logEvent(pharmacyId, 'ACTIVATED', 'polling');
-                        stats.events++;
-
-                        // Mark "New Pharmacy" (First trained activation) if not set
-                        if (!processDate(newFirstTrained)) {
-                            newFirstTrained = new Date();
-                        }
-                    } else if (wasActive === true && isNowActive === false) {
-                        // True -> False: Deactivation
-                        await pharmacyModel.logEvent(pharmacyId, 'DEACTIVATED', 'polling');
-                        stats.events++;
-                    }
-                }
-
-                // Update State
-                await pharmacyModel.updatePollingState(
-                    pharmacyId,
-                    isNowActive,
-                    newFirstDeactivated,
-                    newFirstTrained
-                );
-            } else {
-                // Even if no change, we might want to ensure the record exists (e.g. for new pharmacies)
-                // But the prompt says "First status active=true NOT counted".
-                // But we need to save it so next time we know it was true.
-                if (!internalMap.has(pharmacyId)) {
-                    // It's a brand new pharmacy found in External API.
-                    // We insert it with its current state.
-                    await pharmacyModel.updatePollingState(
-                        pharmacyId,
-                        isNowActive,
-                        null,
-                        null
-                    );
-                }
-            }
-            stats.checked++;
+            // We clone/modify to match expected shape if needed, or just pass as is with override
+            const leadItem = { ...item, active: false };
+            await processPharmacyItem(leadItem, internalMap, stats, false);
         }
 
         console.log(`Polling Complete. Checked: ${stats.checked}, Events: ${stats.events}`);
@@ -173,6 +141,76 @@ async function syncPharmacies() {
         isRunning = false;
     }
 }
+
+async function processPharmacyItem(extP, internalMap, stats, isMarketItem) {
+    const pharmacyId = String(extP.id);
+    const isExternalActive = extP.active; // true | false
+
+    const internalState = internalMap.get(pharmacyId) || {
+        pharmacy_id: pharmacyId,
+        last_active: true, // Default heuristic for new items
+        first_deactivated_at: null,
+        first_trained_activation_at: null
+    };
+
+    let newLastActive = internalState.last_active;
+    let newFirstDeactivated = internalState.first_deactivated_at;
+    let newFirstTrained = internalState.first_trained_activation_at;
+
+    const wasActive = internalState.last_active;
+    const isNowActive = isExternalActive;
+
+    if (wasActive !== isNowActive) {
+        // Change detected!
+
+        // CASE 1: first_deactivated_at IS NULL
+        if (!processDate(newFirstDeactivated)) { // Check if null/invalid
+            if (wasActive === true && isNowActive === false) {
+                // True -> False: Initial Deactivation
+                newFirstDeactivated = new Date();
+                await pharmacyModel.logEvent(pharmacyId, 'DEACTIVATED', 'polling');
+                stats.events++;
+            }
+        }
+        // CASE 2: first_deactivated_at IS NOT NULL
+        else {
+            if (wasActive === false && isNowActive === true) {
+                // False -> True: Activation
+                await pharmacyModel.logEvent(pharmacyId, 'ACTIVATED', 'polling');
+                stats.events++;
+
+                // Mark "New Pharmacy" (First trained activation) if not set
+                if (!processDate(newFirstTrained)) {
+                    newFirstTrained = new Date();
+                }
+            } else if (wasActive === true && isNowActive === false) {
+                // True -> False: Deactivation
+                await pharmacyModel.logEvent(pharmacyId, 'DEACTIVATED', 'polling');
+                stats.events++;
+            }
+        }
+
+        // Update State
+        await pharmacyModel.updatePollingState(
+            pharmacyId,
+            isNowActive,
+            newFirstDeactivated,
+            newFirstTrained
+        );
+    } else {
+        if (!internalMap.has(pharmacyId)) {
+            // New item insert
+            await pharmacyModel.updatePollingState(
+                pharmacyId,
+                isNowActive,
+                null,
+                null
+            );
+        }
+    }
+    stats.checked++;
+}
+
 
 // Cooldown to prevent spamming external API (e.g. 30 seconds)
 let lastSyncTime = 0;
