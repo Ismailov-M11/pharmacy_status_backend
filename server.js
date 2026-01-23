@@ -117,8 +117,6 @@ async function initializeDatabase() {
     );
     `);
 
-<<<<<<< HEAD
-=======
     // Create user_column_settings table for storing user preferences
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_column_settings (
@@ -132,7 +130,7 @@ async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_user_settings ON user_column_settings(user_id, page);
     `);
 
->>>>>>> 7c8f7ba (feat: add user column settings API and database migration)
+
     console.log('Database tables ready!');
   } catch (error) {
     console.error('Error initializing database:', error);
