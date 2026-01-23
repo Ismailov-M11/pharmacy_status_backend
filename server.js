@@ -117,6 +117,22 @@ async function initializeDatabase() {
     );
     `);
 
+<<<<<<< HEAD
+=======
+    // Create user_column_settings table for storing user preferences
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_column_settings (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(100) NOT NULL,
+        page VARCHAR(50) NOT NULL,
+        settings JSONB NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, page)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_settings ON user_column_settings(user_id, page);
+    `);
+
+>>>>>>> 7c8f7ba (feat: add user column settings API and database migration)
     console.log('Database tables ready!');
   } catch (error) {
     console.error('Error initializing database:', error);
