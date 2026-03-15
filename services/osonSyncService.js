@@ -192,45 +192,55 @@ async function runOsonSync(davoToken) {
         const detail = await fetchOsonPharmacyDetail(slug);
 
         if (detail) {
-          await osonModel.upsertPharmacy(
-            slug,
-            {
-              name_ru: detail.NameRu,
-              name_uz: detail.NameUz,
-              parent_region_ru: detail.ParentRegionNameRu,
-              parent_region_uz: detail.ParentRegionNameUz,
-              region_ru: detail.RegionNameRu,
-              region_uz: detail.RegionNameUz,
-              address_ru: detail.AddressRu,
-              address_uz: detail.AddressUz,
-              landmark_ru: detail.LandmarkRu,
-              landmark_uz: detail.LandmarkUz,
-              latitude: detail.Latitude,
-              longitude: detail.Longitude,
-              phone: detail.Phone,
-              open_time: detail.OpenTime,
-              close_time: detail.CloseTime,
-              has_delivery: detail.HasDelivery,
-              is_verified: detail.IsVerified,
-              discount_percent: detail.DiscountPercent,
-              cashback_percent: detail.CashbackPercent,
-            },
-            newStatus
-          );
-          stats.inserted++;
+          try {
+            await osonModel.upsertPharmacy(
+              slug,
+              {
+                name_ru: detail.NameRu,
+                name_uz: detail.NameUz,
+                parent_region_ru: detail.ParentRegionNameRu,
+                parent_region_uz: detail.ParentRegionNameUz,
+                region_ru: detail.RegionNameRu,
+                region_uz: detail.RegionNameUz,
+                address_ru: detail.AddressRu,
+                address_uz: detail.AddressUz,
+                landmark_ru: detail.LandmarkRu,
+                landmark_uz: detail.LandmarkUz,
+                latitude: detail.Latitude,
+                longitude: detail.Longitude,
+                phone: detail.Phone,
+                open_time: detail.OpenTime,
+                close_time: detail.CloseTime,
+                has_delivery: detail.HasDelivery,
+                is_verified: detail.IsVerified,
+                discount_percent: detail.DiscountPercent,
+                cashback_percent: detail.CashbackPercent,
+              },
+              newStatus
+            );
+            stats.inserted++;
+          } catch (upsertErr) {
+            console.error(`[OSON Sync] Failed to upsert slug "${slug}":`, upsertErr.message);
+            stats.errors = (stats.errors || 0) + 1;
+          }
         }
 
         // Small delay between detail requests
         await new Promise((r) => setTimeout(r, 100));
       } else {
         // Existing slug — just update status if changed
-        if (currentDbStatus !== newStatus) {
-          await osonModel.updateStatus(slug, newStatus);
-          stats.statusChanged++;
-        } else {
-          // Update last_synced_at only
-          await osonModel.updateStatus(slug, currentDbStatus);
-          stats.updated++;
+        try {
+          if (currentDbStatus !== newStatus) {
+            await osonModel.updateStatus(slug, newStatus);
+            stats.statusChanged++;
+          } else {
+            // Update last_synced_at only
+            await osonModel.updateStatus(slug, currentDbStatus);
+            stats.updated++;
+          }
+        } catch (updateErr) {
+          console.error(`[OSON Sync] Failed to update slug "${slug}":`, updateErr.message);
+          stats.errors = (stats.errors || 0) + 1;
         }
       }
     }

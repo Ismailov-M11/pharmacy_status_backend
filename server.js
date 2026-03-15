@@ -136,13 +136,13 @@ async function initializeDatabase() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS oson_pharmacies (
         id               SERIAL PRIMARY KEY,
-        slug             VARCHAR(100) UNIQUE NOT NULL,
-        name_ru          VARCHAR(255),
-        name_uz          VARCHAR(255),
-        parent_region_ru VARCHAR(100),
-        parent_region_uz VARCHAR(100),
-        region_ru        VARCHAR(100),
-        region_uz        VARCHAR(100),
+        slug             TEXT UNIQUE NOT NULL,
+        name_ru          TEXT,
+        name_uz          TEXT,
+        parent_region_ru TEXT,
+        parent_region_uz TEXT,
+        region_ru        TEXT,
+        region_uz        TEXT,
         address_ru       TEXT,
         address_uz       TEXT,
         landmark_ru      TEXT,
@@ -163,6 +163,17 @@ async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_oson_slug ON oson_pharmacies(slug);
       CREATE INDEX IF NOT EXISTS idx_oson_status ON oson_pharmacies(oson_status);
       CREATE INDEX IF NOT EXISTS idx_oson_parent_region ON oson_pharmacies(parent_region_ru);
+    `);
+
+    // Migrate existing oson_pharmacies columns from VARCHAR to TEXT (for production)
+    await pool.query(`
+      ALTER TABLE oson_pharmacies ALTER COLUMN slug TYPE TEXT;
+      ALTER TABLE oson_pharmacies ALTER COLUMN name_ru TYPE TEXT;
+      ALTER TABLE oson_pharmacies ALTER COLUMN name_uz TYPE TEXT;
+      ALTER TABLE oson_pharmacies ALTER COLUMN parent_region_ru TYPE TEXT;
+      ALTER TABLE oson_pharmacies ALTER COLUMN parent_region_uz TYPE TEXT;
+      ALTER TABLE oson_pharmacies ALTER COLUMN region_ru TYPE TEXT;
+      ALTER TABLE oson_pharmacies ALTER COLUMN region_uz TYPE TEXT;
     `);
 
     console.log('Database tables ready!');
