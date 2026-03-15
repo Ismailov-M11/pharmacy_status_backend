@@ -30,57 +30,66 @@ const OSON_REGIONS = [
 // ─── Davo API Config ───────────────────────────────────────────────────────
 const DAVO_API_BASE = "https://api.davodelivery.uz/api";
 
+// ─── Batch size for parallel TileInfo requests ────────────────────────────
+const DETAIL_BATCH_SIZE = 50; // fetch 50 pharmacy details at once
+
 // ─── State ─────────────────────────────────────────────────────────────────
 let isSyncing = false;
 let lastSyncAt = null;
 let lastSyncError = null;
-let savedDavoToken = null; // Сохраняем токен для cron
+let savedDavoToken = null;
+
+// Progress tracking
+let progressCurrent = 0;
+let progressTotal = 0;
+let progressPhase = ""; // 'collecting' | 'syncing' | 'cleanup' | 'done'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /**
- * Fetch all slugs from OSON for all regions
- * Returns a Set of slug strings
+ * Fetch all slugs from OSON for all regions in parallel (all regions at once)
  */
 async function fetchAllOsonSlugs() {
   const allSlugs = new Set();
-  const errors = [];
 
-  for (const region of OSON_REGIONS) {
-    try {
-      const response = await axios.get(`${OSON_API_BASE}/SlugList`, {
-        params: { region },
-        headers: OSON_HEADERS,
-        timeout: 15000,
-      });
+  const results = await Promise.allSettled(
+    OSON_REGIONS.map((region) =>
+      axios
+        .get(`${OSON_API_BASE}/SlugList`, {
+          params: { region },
+          headers: OSON_HEADERS,
+          timeout: 20000,
+        })
+        .then((res) => {
+          if (res.data?.Succeeded && res.data?.Data?.Items) {
+            console.log(
+              `[OSON Sync] Region "${region}": ${res.data.Data.Items.length} pharmacies`
+            );
+            return res.data.Data.Items;
+          }
+          return [];
+        })
+    )
+  );
 
-      if (response.data?.Succeeded && response.data?.Data?.Items) {
-        const slugs = response.data.Data.Items;
-        slugs.forEach((slug) => allSlugs.add(slug));
-        console.log(
-          `[OSON Sync] Region "${region}": ${slugs.length} pharmacies`
-        );
-      }
-    } catch (err) {
-      console.error(
-        `[OSON Sync] Failed to fetch region "${region}":`,
-        err.message
-      );
-      errors.push(region);
+  let failedRegions = 0;
+  results.forEach((r) => {
+    if (r.status === "fulfilled") {
+      r.value.forEach((slug) => allSlugs.add(slug));
+    } else {
+      failedRegions++;
+      console.error("[OSON Sync] Region fetch failed:", r.reason?.message);
     }
-
-    // Small delay to avoid overwhelming OSON API
-    await new Promise((r) => setTimeout(r, 200));
-  }
+  });
 
   console.log(
-    `[OSON Sync] Total unique slugs from OSON: ${allSlugs.size} (${errors.length} regions failed)`
+    `[OSON Sync] Total unique slugs: ${allSlugs.size} (${failedRegions} regions failed)`
   );
   return allSlugs;
 }
 
 /**
- * Fetch pharmacy details from OSON TileInfo API
+ * Fetch pharmacy details from OSON TileInfo API (single)
  */
 async function fetchOsonPharmacyDetail(slug) {
   try {
@@ -88,20 +97,36 @@ async function fetchOsonPharmacyDetail(slug) {
       headers: OSON_HEADERS,
       timeout: 10000,
     });
-
     if (response.data?.Succeeded && response.data?.Data) {
       return response.data.Data;
     }
     return null;
-  } catch (err) {
-    console.error(`[OSON Sync] Failed to fetch TileInfo for "${slug}":`, err.message);
+  } catch {
     return null;
   }
 }
 
 /**
+ * Fetch a batch of pharmacy details in parallel
+ * @param {string[]} slugs
+ * @returns {Map<string, object>} slug → detail
+ */
+async function fetchDetailBatch(slugs) {
+  const results = await Promise.allSettled(
+    slugs.map((slug) => fetchOsonPharmacyDetail(slug).then((d) => ({ slug, d })))
+  );
+
+  const map = new Map();
+  results.forEach((r) => {
+    if (r.status === "fulfilled" && r.value.d) {
+      map.set(r.value.slug, r.value.d);
+    }
+  });
+  return map;
+}
+
+/**
  * Fetch all connected pharmacy slugs from Davo API
- * Returns a Set of slug strings
  */
 async function fetchDavoConnectedSlugs(davoToken) {
   try {
@@ -113,30 +138,24 @@ async function fetchDavoConnectedSlugs(davoToken) {
           authorization: `Bearer ${davoToken}`,
           "content-type": "application/json",
         },
-        timeout: 15000,
+        timeout: 20000,
       }
     );
 
     const list = response.data?.payload?.list || [];
     const slugSet = new Set();
-    list.forEach((market) => {
-      if (market.slug) slugSet.add(market.slug);
-    });
+    list.forEach((m) => { if (m.slug) slugSet.add(m.slug); });
 
-    console.log(`[OSON Sync] Connected pharmacies in Davo: ${slugSet.size}`);
+    console.log(`[OSON Sync] Connected in Davo: ${slugSet.size}`);
     return slugSet;
   } catch (err) {
-    console.error("[OSON Sync] Failed to fetch Davo market list:", err.message);
+    console.error("[OSON Sync] Failed to fetch Davo list:", err.message);
     return new Set();
   }
 }
 
 // ─── Main Sync Function ────────────────────────────────────────────────────
 
-/**
- * Main synchronization function
- * @param {string} davoToken - Bearer token for davodelivery API
- */
 async function runOsonSync(davoToken) {
   if (isSyncing) {
     console.log("[OSON Sync] Already running, skipping.");
@@ -145,133 +164,165 @@ async function runOsonSync(davoToken) {
 
   isSyncing = true;
   lastSyncError = null;
+  progressCurrent = 0;
+  progressTotal = 0;
+  progressPhase = "collecting";
   const startTime = Date.now();
 
   console.log("[OSON Sync] ====== Starting OSON Sync ======");
 
   try {
-    // Step 1: Get all OSON slugs
+    // Step 1: Collect all OSON slugs (parallel by region)
+    progressPhase = "collecting";
     const osonSlugs = await fetchAllOsonSlugs();
 
-    // Step 2: Get connected slugs from Davo
+    // Step 2: Get Davo connected slugs
     const davoSlugs = await fetchDavoConnectedSlugs(davoToken);
 
-    // Step 3: Get existing DB slugs + statuses
+    // Step 3: Get existing DB state
     const dbSlugsMap = await osonModel.getAllSlugsWithStatus();
 
-    // Step 4: Counters
-    let stats = {
-      inserted: 0,
-      updated: 0,
-      statusChanged: 0,
-      deleted: 0,
-      markedDeleted: 0,
-    };
+    const stats = { inserted: 0, updated: 0, statusChanged: 0, deleted: 0, markedDeleted: 0, errors: 0 };
 
-    // Step 5: Process each OSON slug (that exists in OSON right now)
+    // Step 4: Split OSON slugs into new vs existing
+    const newSlugs = [];         // need TileInfo fetch
+    const existingSlugs = [];    // already in DB, just update status
+
     for (const slug of osonSlugs) {
-      const isConnectedInDavo = davoSlugs.has(slug);
-      const currentDbStatus = dbSlugsMap.get(slug); // undefined if not in DB
-
-      // Determine new status
-      let newStatus;
-      if (isConnectedInDavo) {
-        newStatus = "connected";
+      if (dbSlugsMap.has(slug)) {
+        existingSlugs.push(slug);
       } else {
-        // If it was 'deleted' before and now it's back in OSON but not in Davo
-        // → restore to 'not_connected'
-        if (currentDbStatus === "deleted") {
-          newStatus = "not_connected";
-        } else {
-          newStatus = "not_connected";
-        }
-      }
-
-      if (currentDbStatus === undefined) {
-        // Brand new slug — fetch details and insert
-        const detail = await fetchOsonPharmacyDetail(slug);
-
-        if (detail) {
-          try {
-            await osonModel.upsertPharmacy(
-              slug,
-              {
-                name_ru: detail.NameRu,
-                name_uz: detail.NameUz,
-                parent_region_ru: detail.ParentRegionNameRu,
-                parent_region_uz: detail.ParentRegionNameUz,
-                region_ru: detail.RegionNameRu,
-                region_uz: detail.RegionNameUz,
-                address_ru: detail.AddressRu,
-                address_uz: detail.AddressUz,
-                landmark_ru: detail.LandmarkRu,
-                landmark_uz: detail.LandmarkUz,
-                latitude: detail.Latitude,
-                longitude: detail.Longitude,
-                phone: detail.Phone,
-                open_time: detail.OpenTime,
-                close_time: detail.CloseTime,
-                has_delivery: detail.HasDelivery,
-                is_verified: detail.IsVerified,
-                discount_percent: detail.DiscountPercent,
-                cashback_percent: detail.CashbackPercent,
-              },
-              newStatus
-            );
-            stats.inserted++;
-          } catch (upsertErr) {
-            console.error(`[OSON Sync] Failed to upsert slug "${slug}":`, upsertErr.message);
-            stats.errors = (stats.errors || 0) + 1;
-          }
-        }
-
-        // Small delay between detail requests
-        await new Promise((r) => setTimeout(r, 100));
-      } else {
-        // Existing slug — just update status if changed
-        try {
-          if (currentDbStatus !== newStatus) {
-            await osonModel.updateStatus(slug, newStatus);
-            stats.statusChanged++;
-          } else {
-            // Update last_synced_at only
-            await osonModel.updateStatus(slug, currentDbStatus);
-            stats.updated++;
-          }
-        } catch (updateErr) {
-          console.error(`[OSON Sync] Failed to update slug "${slug}":`, updateErr.message);
-          stats.errors = (stats.errors || 0) + 1;
-        }
+        newSlugs.push(slug);
       }
     }
 
-    // Step 6: Handle slugs that were in DB but NOT in OSON anymore
+    // Set total progress (only new slugs need detail fetches)
+    progressTotal = newSlugs.length + existingSlugs.length;
+    progressPhase = "syncing";
+
+    console.log(`[OSON Sync] New slugs: ${newSlugs.length}, Existing: ${existingSlugs.length}`);
+
+    // ── Step 5a: Process EXISTING slugs in batches (status update only, fast) ──
+    const EXISTING_BATCH = 250; // batch size for DB updates
+    for (let i = 0; i < existingSlugs.length; i += EXISTING_BATCH) {
+      const batch = existingSlugs.slice(i, i + EXISTING_BATCH);
+      await Promise.allSettled(
+        batch.map(async (slug) => {
+          const currentDbStatus = dbSlugsMap.get(slug);
+          const isConnected = davoSlugs.has(slug);
+          const newStatus = isConnected ? "connected" : "not_connected";
+
+          try {
+            if (currentDbStatus !== newStatus) {
+              await osonModel.updateStatus(slug, newStatus);
+              stats.statusChanged++;
+            } else {
+              await osonModel.updateStatus(slug, currentDbStatus);
+              stats.updated++;
+            }
+          } catch (err) {
+            console.error(`[OSON Sync] Update error "${slug}":`, err.message);
+            stats.errors++;
+          }
+          progressCurrent++;
+        })
+      );
+    }
+
+    // ── Step 5b: Process NEW slugs in batches of DETAIL_BATCH_SIZE (TileInfo fetch) ──
+    for (let i = 0; i < newSlugs.length; i += DETAIL_BATCH_SIZE) {
+      const batch = newSlugs.slice(i, i + DETAIL_BATCH_SIZE);
+
+      // Fetch details for the whole batch in parallel
+      const detailMap = await fetchDetailBatch(batch);
+
+      // Save each to DB
+      await Promise.allSettled(
+        batch.map(async (slug) => {
+          const detail = detailMap.get(slug);
+          const newStatus = davoSlugs.has(slug) ? "connected" : "not_connected";
+
+          if (detail) {
+            try {
+              await osonModel.upsertPharmacy(
+                slug,
+                {
+                  name_ru: detail.NameRu,
+                  name_uz: detail.NameUz,
+                  parent_region_ru: detail.ParentRegionNameRu,
+                  parent_region_uz: detail.ParentRegionNameUz,
+                  region_ru: detail.RegionNameRu,
+                  region_uz: detail.RegionNameUz,
+                  address_ru: detail.AddressRu,
+                  address_uz: detail.AddressUz,
+                  landmark_ru: detail.LandmarkRu,
+                  landmark_uz: detail.LandmarkUz,
+                  latitude: detail.Latitude,
+                  longitude: detail.Longitude,
+                  phone: detail.Phone,
+                  open_time: detail.OpenTime,
+                  close_time: detail.CloseTime,
+                  has_delivery: detail.HasDelivery,
+                  is_verified: detail.IsVerified,
+                  discount_percent: detail.DiscountPercent,
+                  cashback_percent: detail.CashbackPercent,
+                },
+                newStatus
+              );
+              stats.inserted++;
+            } catch (err) {
+              console.error(`[OSON Sync] Upsert error "${slug}":`, err.message);
+              stats.errors++;
+            }
+          } else {
+            // No detail returned — insert minimal record
+            try {
+              await osonModel.upsertPharmacy(slug, {}, newStatus);
+              stats.inserted++;
+            } catch (err) {
+              stats.errors++;
+            }
+          }
+          progressCurrent++;
+        })
+      );
+
+      const pct = Math.round((progressCurrent / progressTotal) * 100);
+      console.log(
+        `[OSON Sync] Progress: ${progressCurrent}/${progressTotal} (${pct}%) | Batch ${Math.floor(i / DETAIL_BATCH_SIZE) + 1}`
+      );
+    }
+
+    // Step 6: Cleanup — slugs that disappeared from OSON
+    progressPhase = "cleanup";
     for (const [slug, currentStatus] of dbSlugsMap) {
       if (!osonSlugs.has(slug)) {
         if (currentStatus === "connected") {
-          // Was connected → mark as deleted
-          await osonModel.updateStatus(slug, "deleted");
-          stats.markedDeleted++;
-          console.log(`[OSON Sync] Marked as deleted (was connected): ${slug}`);
+          try {
+            await osonModel.updateStatus(slug, "deleted");
+            stats.markedDeleted++;
+          } catch (err) { stats.errors++; }
         } else if (currentStatus === "not_connected") {
-          // Was not connected + disappeared → delete from DB entirely
-          await osonModel.deletePharmacy(slug);
-          stats.deleted++;
-          console.log(`[OSON Sync] Physically deleted (was not_connected): ${slug}`);
+          try {
+            await osonModel.deletePharmacy(slug);
+            stats.deleted++;
+          } catch (err) { stats.errors++; }
         }
-        // If already 'deleted' → leave as is
+        // 'deleted' → leave as is
       }
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     lastSyncAt = new Date();
+    progressPhase = "done";
+    progressCurrent = progressTotal; // 100%
 
-    console.log(`[OSON Sync] ====== Sync Complete in ${duration}s ======`);
-    console.log(`[OSON Sync] Stats:`, stats);
-
+    console.log(`[OSON Sync] ====== Complete in ${duration}s ======`, stats);
     return { success: true, stats, duration, syncedAt: lastSyncAt };
+
   } catch (err) {
     lastSyncError = err.message;
+    progressPhase = "error";
     console.error("[OSON Sync] Fatal error:", err);
     throw err;
   } finally {
@@ -281,45 +332,31 @@ async function runOsonSync(davoToken) {
 
 // ─── Manual Trigger ────────────────────────────────────────────────────────
 
-/**
- * Trigger sync manually (e.g. from API endpoint)
- * Saves the token for future cron runs
- */
 async function triggerSync(davoToken) {
-  if (davoToken) {
-    savedDavoToken = davoToken; // Save for cron reuse
-  }
+  if (davoToken) savedDavoToken = davoToken;
   return runOsonSync(savedDavoToken);
 }
 
 // ─── Cron Scheduler ───────────────────────────────────────────────────────
 
 function startOsonCron() {
-  // Every day at 12:00 Tashkent time (UTC+5 = 07:00 UTC)
   cron.schedule(
     "0 12 * * *",
     async () => {
-      console.log("[OSON Cron] Triggered daily sync at 12:00 (Tashkent)");
-
+      console.log("[OSON Cron] Daily sync at 12:00 Tashkent");
       if (!savedDavoToken) {
-        console.warn(
-          "[OSON Cron] No saved Davo token. Sync skipped. A user must trigger a manual sync first."
-        );
+        console.warn("[OSON Cron] No saved token. Skipped.");
         return;
       }
-
       try {
         await runOsonSync(savedDavoToken);
       } catch (err) {
         console.error("[OSON Cron] Sync failed:", err.message);
       }
     },
-    {
-      timezone: "Asia/Tashkent",
-    }
+    { timezone: "Asia/Tashkent" }
   );
-
-  console.log("[OSON Cron] Scheduled daily sync at 12:00 Asia/Tashkent");
+  console.log("[OSON Cron] Scheduled daily at 12:00 Asia/Tashkent");
 }
 
 // ─── Status Accessors ──────────────────────────────────────────────────────
@@ -330,6 +367,12 @@ function getSyncStatus() {
     lastSyncAt,
     lastSyncError,
     hasToken: !!savedDavoToken,
+    progress: {
+      current: progressCurrent,
+      total: progressTotal,
+      percent: progressTotal > 0 ? Math.round((progressCurrent / progressTotal) * 100) : 0,
+      phase: progressPhase,
+    },
   };
 }
 

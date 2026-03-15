@@ -176,6 +176,60 @@ async function initializeDatabase() {
       ALTER TABLE oson_pharmacies ALTER COLUMN region_uz TYPE TEXT;
     `);
 
+    // Seed: pharmacies that were connected in Davo but do NOT exist in OSON at all.
+    // These must be marked as 'deleted'. Only insert if slug not already present;
+    // if already present and NOT 'connected', set to 'deleted'.
+    const deletedSlugs = [
+      'islam-pharm-90904',
+      'neofarm-137918',
+      '100-apteka-166144',
+      '5555-pharm-group-14608',
+      'marjon-farm-trade-n3-24266',
+      'marjon-farm-trade-n2-42042',
+      'marjon-farm-trade-n11-226446',
+      'marjon-farm-trade-n9-226468',
+      'access-pharm-102454',
+      'aptyeka-a5-n6-38038',
+      'aptyeka-a5-n15-62458',
+      'aptyeka-a5-n14-6710',
+      'aptyeka-a5-n1-726',
+      'aptyeka-a5-n5-8272',
+      'aptyeka-a5-n17-9174',
+      'aptyeka-a5-n19-94116',
+      'aptyeka-a5-n8-8602',
+      'aptyeka-a5-n2-11506',
+      'aptyeka-a5-n7-116798',
+      'ssss-med-apteka-14344',
+      'al-madina-pharm-81928',
+      'shahrizoda-biznes-servis-171996',
+      'nice-farm-n2-37070',
+      'akmal-farm-medical-n3-parkent-bozori-104676',
+      'genesis-trade-yunusabod-108152',
+      'top-farm-n16-130174',
+      'top-pharm-n2-72974',
+      'top-farm-n14-83028',
+      'nuriymon-pharm-health-23254',
+      'genesis-trade-sirg-ali-78320',
+      'top-farm-56078',
+      'genesis-trade-s1-78386',
+      'genesis-trade-yangiobod-16148',
+      'genesis-trade-chilonzor-30734',
+      'onko-farm-73788',
+      'farm-servis-193776',
+      'accees-pharm-102454',
+    ];
+
+    for (const slug of deletedSlugs) {
+      await pool.query(`
+        INSERT INTO oson_pharmacies (slug, oson_status, last_synced_at, created_at)
+        VALUES ($1, 'deleted', NOW(), NOW())
+        ON CONFLICT (slug) DO UPDATE
+          SET oson_status = 'deleted', last_synced_at = NOW()
+          WHERE oson_pharmacies.oson_status <> 'connected';
+      `, [slug]);
+    }
+    console.log(`Seeded ${deletedSlugs.length} manually-deleted OSON pharmacies.`);
+
     console.log('Database tables ready!');
   } catch (error) {
     console.error('Error initializing database:', error);
