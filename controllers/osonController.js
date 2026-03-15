@@ -113,6 +113,7 @@ async function getSyncStatus(req, res) {
       lastSyncAt: syncStatus.lastSyncAt,
       lastSyncError: syncStatus.lastSyncError,
       hasToken: syncStatus.hasToken,
+      progress: syncStatus.progress,
       stats: {
         total: parseInt(stats.total) || 0,
         connected: parseInt(stats.connected) || 0,
