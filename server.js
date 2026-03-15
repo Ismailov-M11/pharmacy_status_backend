@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
 const statusRoutes = require("./routes/statusRoutes");
+const osonRoutes = require("./routes/osonRoutes");
 
 const app = express();
 
@@ -16,6 +17,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use("/api/status", statusRoutes);
+app.use("/api/oson", osonRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -130,6 +132,38 @@ async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_user_settings ON user_column_settings(user_id, page);
     `);
 
+    // Create oson_pharmacies table for OSON Slug List module
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS oson_pharmacies (
+        id               SERIAL PRIMARY KEY,
+        slug             VARCHAR(100) UNIQUE NOT NULL,
+        name_ru          VARCHAR(255),
+        name_uz          VARCHAR(255),
+        parent_region_ru VARCHAR(100),
+        parent_region_uz VARCHAR(100),
+        region_ru        VARCHAR(100),
+        region_uz        VARCHAR(100),
+        address_ru       TEXT,
+        address_uz       TEXT,
+        landmark_ru      TEXT,
+        landmark_uz      TEXT,
+        latitude         DECIMAL(10,7),
+        longitude        DECIMAL(10,7),
+        phone            VARCHAR(50),
+        open_time        VARCHAR(10),
+        close_time       VARCHAR(10),
+        has_delivery     BOOLEAN DEFAULT FALSE,
+        is_verified      BOOLEAN DEFAULT FALSE,
+        discount_percent INTEGER DEFAULT 0,
+        cashback_percent INTEGER DEFAULT 0,
+        oson_status      VARCHAR(20) DEFAULT 'not_connected',
+        last_synced_at   TIMESTAMP DEFAULT NOW(),
+        created_at       TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_oson_slug ON oson_pharmacies(slug);
+      CREATE INDEX IF NOT EXISTS idx_oson_status ON oson_pharmacies(oson_status);
+      CREATE INDEX IF NOT EXISTS idx_oson_parent_region ON oson_pharmacies(parent_region_ru);
+    `);
 
     console.log('Database tables ready!');
   } catch (error) {
@@ -146,6 +180,10 @@ initializeDatabase().then(() => {
   // Start Polling Service
   const pollingService = require('./services/pollingService');
   pollingService.startPolling();
+
+  // Start OSON Cron Sync (daily at 12:00 Tashkent time)
+  const osonSyncService = require('./services/osonSyncService');
+  osonSyncService.startOsonCron();
 
   app.listen(PORT, () => {
     console.log(`Backend running on port ${PORT} `);
