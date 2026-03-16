@@ -12,20 +12,39 @@ async function getAllOsonPharmacies(filters = {}) {
   let idx = 1;
 
   if (status && status !== "all") {
-    query += ` AND oson_status = $${idx++}`;
-    params.push(status);
+    // Check if status is "connected,not_connected" and filter accordingly
+    const statusArray = (Array.isArray(status) ? status : status.split(","))
+      .map((s) => s.trim())
+      .filter((s) => s && s !== "all");
+
+    if (statusArray.length > 0) {
+      query += ` AND oson_status = ANY($${idx++})`;
+      params.push(statusArray);
+    }
   }
 
   if (parentRegion) {
-    query += ` AND (LOWER(parent_region_ru) = LOWER($${idx}) OR LOWER(parent_region_uz) = LOWER($${idx}))`;
-    params.push(parentRegion);
-    idx++;
+    const prArray = (Array.isArray(parentRegion) ? parentRegion : parentRegion.split(","))
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (prArray.length > 0) {
+      query += ` AND (LOWER(parent_region_ru) = ANY($${idx}) OR LOWER(parent_region_uz) = ANY($${idx}))`;
+      params.push(prArray);
+      idx++;
+    }
   }
 
   if (region) {
-    query += ` AND (LOWER(region_ru) = LOWER($${idx}) OR LOWER(region_uz) = LOWER($${idx}))`;
-    params.push(region);
-    idx++;
+    const rArray = (Array.isArray(region) ? region : region.split(","))
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (rArray.length > 0) {
+      query += ` AND (LOWER(region_ru) = ANY($${idx}) OR LOWER(region_uz) = ANY($${idx}))`;
+      params.push(rArray);
+      idx++;
+    }
   }
 
   if (search) {
@@ -59,9 +78,15 @@ async function getDistinctRegions(parentRegion = null) {
   const params = [];
 
   if (parentRegion) {
-    query +=
-      " AND (LOWER(parent_region_ru) = LOWER($1) OR LOWER(parent_region_uz) = LOWER($1))";
-    params.push(parentRegion);
+    const prArray = (Array.isArray(parentRegion) ? parentRegion : parentRegion.split(","))
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (prArray.length > 0) {
+      query +=
+        " AND (LOWER(parent_region_ru) = ANY($1) OR LOWER(parent_region_uz) = ANY($1))";
+      params.push(prArray);
+    }
   }
 
   query += " ORDER BY region_ru";
