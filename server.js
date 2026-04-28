@@ -6,9 +6,18 @@ const osonRoutes = require("./routes/osonRoutes");
 
 const app = express();
 
-// CORS configuration - allow requests from your Netlify frontend
+const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map(o => o.trim());
+
 const corsOptions = {
-  origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    }
+  },
   credentials: true,
   optionsSuccessStatus: 200
 };
