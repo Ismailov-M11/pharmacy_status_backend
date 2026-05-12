@@ -103,11 +103,18 @@ async function getPharmaciesByDateRange(fromDate, toDate) {
 }
 
 async function getActivityEventsByDateRange(fromDate, toDate) {
+  // Only show events AFTER the onboarding cycle is complete:
+  //   1. Convert (appears as active)      → not logged
+  //   2. First deactivation               → logged, but excluded here
+  //   3. Agent first activation           → logged (sets first_trained_activation_at), excluded here
+  //   4+ Regular events                   → included (event_at > first_trained_activation_at)
   const query = `
     SELECT e.*, p.last_active as current_status
     FROM pharmacy_events e
-    LEFT JOIN pharmacy_status p ON e.pharmacy_id = p.pharmacy_id
+    INNER JOIN pharmacy_status p ON e.pharmacy_id = p.pharmacy_id
     WHERE e.event_at >= $1 AND e.event_at <= $2
+      AND p.first_trained_activation_at IS NOT NULL
+      AND e.event_at > p.first_trained_activation_at
     ORDER BY e.event_at DESC
   `;
   const result = await db.query(query, [fromDate, toDate]);
