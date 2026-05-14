@@ -131,6 +131,7 @@ async function upsertPharmacy(slug, data, newStatus) {
     is_verified,
     discount_percent,
     cashback_percent,
+    oson_synced_time,
   } = data;
 
   // On conflict: update data fields and last_synced_at
@@ -141,11 +142,11 @@ async function upsertPharmacy(slug, data, newStatus) {
       region_ru, region_uz, address_ru, address_uz, landmark_ru, landmark_uz,
       latitude, longitude, phone, open_time, close_time,
       has_delivery, is_verified, discount_percent, cashback_percent,
-      oson_status, last_synced_at, created_at
+      oson_status, last_synced_at, created_at, oson_synced_time
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
       $12, $13, $14, $15, $16, $17, $18, $19, $20,
-      $21, NOW(), NOW()
+      $21, NOW(), NOW(), $22
     )
     ON CONFLICT (slug) DO UPDATE SET
       name_ru = EXCLUDED.name_ru,
@@ -167,6 +168,7 @@ async function upsertPharmacy(slug, data, newStatus) {
       is_verified = EXCLUDED.is_verified,
       discount_percent = EXCLUDED.discount_percent,
       cashback_percent = EXCLUDED.cashback_percent,
+      oson_synced_time = COALESCE(EXCLUDED.oson_synced_time, oson_pharmacies.oson_synced_time),
       last_synced_at = NOW()
     RETURNING *;
   `;
@@ -193,6 +195,7 @@ async function upsertPharmacy(slug, data, newStatus) {
     discount_percent,
     cashback_percent,
     newStatus,
+    oson_synced_time || null,
   ]);
 
   return result.rows[0];

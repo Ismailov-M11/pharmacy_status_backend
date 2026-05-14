@@ -185,6 +185,11 @@ async function initializeDatabase() {
       ALTER TABLE oson_pharmacies ALTER COLUMN region_uz TYPE TEXT;
     `);
 
+    // Add oson_synced_time column if not exists (stores SyncedTime from OSON API response)
+    await pool.query(`
+      ALTER TABLE oson_pharmacies ADD COLUMN IF NOT EXISTS oson_synced_time TIMESTAMP NULL;
+    `);
+
     // Seed: pharmacies that were connected in Davo but do NOT exist in OSON at all.
     // These must be marked as 'deleted'. Only insert if slug not already present;
     // if already present and NOT 'connected', set to 'deleted'.
