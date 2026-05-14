@@ -31,7 +31,7 @@ const OSON_REGIONS = [
 const DAVO_API_BASE = "https://api.davodelivery.uz/api";
 
 // ─── Batch size for parallel TileInfo requests ────────────────────────────
-const DETAIL_BATCH_SIZE = 50; // fetch 50 pharmacy details at once
+const DETAIL_BATCH_SIZE = 50;
 
 // ─── State ─────────────────────────────────────────────────────────────────
 let isSyncing = false;
@@ -39,16 +39,12 @@ let lastSyncAt = null;
 let lastSyncError = null;
 let savedDavoToken = null;
 
-// Progress tracking
 let progressCurrent = 0;
 let progressTotal = 0;
-let progressPhase = ""; // 'collecting' | 'syncing' | 'cleanup' | 'done'
+let progressPhase = "";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-/**
- * Fetch all slugs from OSON for all regions in parallel (all regions at once)
- */
 async function fetchAllOsonSlugs() {
   const allSlugs = new Set();
 
@@ -88,9 +84,6 @@ async function fetchAllOsonSlugs() {
   return allSlugs;
 }
 
-/**
- * Fetch pharmacy details from OSON TileInfo API (single)
- */
 async function fetchOsonPharmacyDetail(slug) {
   try {
     const response = await axios.get(`${OSON_API_BASE}/TileInfo/${slug}`, {
@@ -106,11 +99,6 @@ async function fetchOsonPharmacyDetail(slug) {
   }
 }
 
-/**
- * Fetch a batch of pharmacy details in parallel
- * @param {string[]} slugs
- * @returns {Map<string, object>} slug → detail
- */
 async function fetchDetailBatch(slugs) {
   const results = await Promise.allSettled(
     slugs.map((slug) => fetchOsonPharmacyDetail(slug).then((d) => ({ slug, d })))
@@ -125,9 +113,6 @@ async function fetchDetailBatch(slugs) {
   return map;
 }
 
-/**
- * Fetch all connected pharmacy slugs from Davo API
- */
 async function fetchDavoConnectedSlugs(davoToken) {
   try {
     const response = await axios.post(
@@ -172,21 +157,15 @@ async function runOsonSync(davoToken) {
   console.log("[OSON Sync] ====== Starting OSON Sync ======");
 
   try {
-    // Step 1: Collect all OSON slugs (parallel by region)
     progressPhase = "collecting";
     const osonSlugs = await fetchAllOsonSlugs();
-
-    // Step 2: Get Davo connected slugs
     const davoSlugs = await fetchDavoConnectedSlugs(davoToken);
-
-    // Step 3: Get existing DB state
     const dbSlugsMap = await osonModel.getAllSlugsWithStatus();
 
     const stats = { inserted: 0, updated: 0, statusChanged: 0, deleted: 0, markedDeleted: 0, errors: 0 };
 
-    // Step 4: Split OSON slugs into new vs existing
-    const newSlugs = [];         // need TileInfo fetch
-    const existingSlugs = [];    // already in DB, just update status
+    const newSlugs = [];
+    const existingSlugs = [];
 
     for (const slug of osonSlugs) {
       if (dbSlugsMap.has(slug)) {
@@ -196,28 +175,33 @@ async function runOsonSync(davoToken) {
       }
     }
 
-    // Set total progress (only new slugs need detail fetches)
     progressTotal = newSlugs.length + existingSlugs.length;
     progressPhase = "syncing";
 
     console.log(`[OSON Sync] New slugs: ${newSlugs.length}, Existing: ${existingSlugs.length}`);
 
-    // ── Step 5a: Process EXISTING slugs in batches (status update only, fast) ──
-    const EXISTING_BATCH = 250; // batch size for DB updates
-    for (let i = 0; i < existingSlugs.length; i += EXISTING_BATCH) {
-      const batch = existingSlugs.slice(i, i + EXISTING_BATCH);
+    // ── Step 5a: Process EXISTING slugs ──
+    // Fetch TileInfo for each batch to get SyncedTime from OSON API.
+    for (let i = 0; i < existingSlugs.length; i += DETAIL_BATCH_SIZE) {
+      const batch = existingSlugs.slice(i, i + DETAIL_BATCH_SIZE);
+      const detailMap = await fetchDetailBatch(batch);
+
       await Promise.allSettled(
         batch.map(async (slug) => {
           const currentDbStatus = dbSlugsMap.get(slug);
           const isConnected = davoSlugs.has(slug);
           const newStatus = isConnected ? "connected" : "not_connected";
+          const detail = detailMap.get(slug);
 
           try {
+            await osonModel.updateStatusAndSyncedTime(
+              slug,
+              newStatus,
+              detail?.SyncedTime || null
+            );
             if (currentDbStatus !== newStatus) {
-              await osonModel.updateStatus(slug, newStatus);
               stats.statusChanged++;
             } else {
-              await osonModel.updateStatus(slug, currentDbStatus);
               stats.updated++;
             }
           } catch (err) {
@@ -227,16 +211,18 @@ async function runOsonSync(davoToken) {
           progressCurrent++;
         })
       );
+
+      const pct = Math.round((progressCurrent / progressTotal) * 100);
+      console.log(
+        `[OSON Sync] Existing batch ${Math.floor(i / DETAIL_BATCH_SIZE) + 1}: ${progressCurrent}/${progressTotal} (${pct}%)`
+      );
     }
 
-    // ── Step 5b: Process NEW slugs in batches of DETAIL_BATCH_SIZE (TileInfo fetch) ──
+    // ── Step 5b: Process NEW slugs (full upsert with TileInfo) ──
     for (let i = 0; i < newSlugs.length; i += DETAIL_BATCH_SIZE) {
       const batch = newSlugs.slice(i, i + DETAIL_BATCH_SIZE);
-
-      // Fetch details for the whole batch in parallel
       const detailMap = await fetchDetailBatch(batch);
 
-      // Save each to DB
       await Promise.allSettled(
         batch.map(async (slug) => {
           const detail = detailMap.get(slug);
@@ -276,7 +262,6 @@ async function runOsonSync(davoToken) {
               stats.errors++;
             }
           } else {
-            // No detail returned — insert minimal record
             try {
               await osonModel.upsertPharmacy(slug, {}, newStatus);
               stats.inserted++;
@@ -290,11 +275,11 @@ async function runOsonSync(davoToken) {
 
       const pct = Math.round((progressCurrent / progressTotal) * 100);
       console.log(
-        `[OSON Sync] Progress: ${progressCurrent}/${progressTotal} (${pct}%) | Batch ${Math.floor(i / DETAIL_BATCH_SIZE) + 1}`
+        `[OSON Sync] New batch ${Math.floor(i / DETAIL_BATCH_SIZE) + 1}: ${progressCurrent}/${progressTotal} (${pct}%)`
       );
     }
 
-    // Step 6: Cleanup — slugs that disappeared from OSON
+    // Step 6: Cleanup
     progressPhase = "cleanup";
     for (const [slug, currentStatus] of dbSlugsMap) {
       if (!osonSlugs.has(slug)) {
@@ -309,14 +294,13 @@ async function runOsonSync(davoToken) {
             stats.deleted++;
           } catch (err) { stats.errors++; }
         }
-        // 'deleted' → leave as is
       }
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     lastSyncAt = new Date();
     progressPhase = "done";
-    progressCurrent = progressTotal; // 100%
+    progressCurrent = progressTotal;
 
     console.log(`[OSON Sync] ====== Complete in ${duration}s ======`, stats);
     return { success: true, stats, duration, syncedAt: lastSyncAt };
@@ -331,14 +315,10 @@ async function runOsonSync(davoToken) {
   }
 }
 
-// ─── Manual Trigger ────────────────────────────────────────────────────────
-
 async function triggerSync(davoToken) {
   if (davoToken) savedDavoToken = davoToken;
   return runOsonSync(savedDavoToken);
 }
-
-// ─── Cron Scheduler ───────────────────────────────────────────────────────
 
 function startOsonCron() {
   cron.schedule(
@@ -359,8 +339,6 @@ function startOsonCron() {
   );
   console.log("[OSON Cron] Scheduled daily at 12:00 Asia/Tashkent");
 }
-
-// ─── Status Accessors ──────────────────────────────────────────────────────
 
 function getSyncStatus() {
   return {
