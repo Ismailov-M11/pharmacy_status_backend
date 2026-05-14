@@ -3,56 +3,68 @@ const osonSyncService = require("../services/osonSyncService");
 
 /**
  * GET /api/oson/data
- * Returns all OSON pharmacies with optional filters:
+ * Returns paginated OSON pharmacies with optional filters:
  *   ?status=connected|not_connected|deleted|all
  *   ?parentRegion=Ташкент
  *   ?region=Юнусабад
  *   ?search=apteka
+ *   ?page=0&size=100   (pagination; size=0 means load all)
  */
 async function getData(req, res) {
   try {
-    const { status, parentRegion, region, search } = req.query;
+    const { status, parentRegion, region, search, page, size } = req.query;
 
-    const pharmacies = await osonModel.getAllOsonPharmacies({
+    const pageNum = Math.max(0, parseInt(page) || 0);
+    const sizeNum = parseInt(size);
+    // size=0 → load all (for map view); default 100
+    const loadAll = sizeNum === 0;
+
+    const filters = {
       status: status || "all",
       parentRegion: parentRegion || null,
       region: region || null,
       search: search || null,
-    });
+    };
 
-    // Get distinct filter options
-    const [parentRegions, regions, stats] = await Promise.all([
-      osonModel.getDistinctParentRegions(),
-      osonModel.getDistinctRegions(parentRegion || null),
-      osonModel.getSyncStats(),
-    ]);
-
-    const syncStatus = osonSyncService.getSyncStatus();
+    let data, total;
+    if (loadAll) {
+      const rows = await osonModel.getAllOsonPharmacies(filters);
+      data = rows;
+      total = rows.length;
+    } else {
+      const pageSize = Math.min(Math.max(1, sizeNum || 100), 10000);
+      ({ data, total } = await osonModel.getOsonPharmaciesPaginated(filters, pageNum, pageSize));
+    }
 
     res.json({
-      data: pharmacies,
-      total: pharmacies.length,
-      filters: {
-        parentRegions,
-        regions,
-      },
-      stats: {
-        total: parseInt(stats.total) || 0,
-        connected: parseInt(stats.connected) || 0,
-        not_connected: parseInt(stats.not_connected) || 0,
-        deleted: parseInt(stats.deleted) || 0,
-        lastSyncedAt: stats.last_synced_at,
-      },
-      syncStatus: {
-        isSyncing: syncStatus.isSyncing,
-        lastSyncAt: syncStatus.lastSyncAt,
-        lastSyncError: syncStatus.lastSyncError,
-        hasToken: syncStatus.hasToken,
-      },
+      data,
+      total,
+      page: loadAll ? 0 : pageNum,
+      size: loadAll ? total : (sizeNum || 100),
     });
   } catch (error) {
     console.error("[OSON Controller] getData error:", error);
     res.status(500).json({ error: "Failed to fetch OSON pharmacies" });
+  }
+}
+
+/**
+ * GET /api/oson/stats
+ * Returns aggregate counts and last sync time.
+ */
+async function getStats(req, res) {
+  try {
+    const stats = await osonModel.getSyncStats();
+    res.json({
+      total: parseInt(stats.total) || 0,
+      connected: parseInt(stats.connected) || 0,
+      not_connected: parseInt(stats.not_connected) || 0,
+      deleted: parseInt(stats.deleted) || 0,
+      lastSyncedAt: stats.last_synced_at,
+    });
+  } catch (error) {
+    console.error("[OSON Controller] getStats error:", error);
+    res.status(500).json({ error: "Failed to fetch stats" });
   }
 }
 
@@ -150,6 +162,7 @@ async function getFilterOptions(req, res) {
 
 module.exports = {
   getData,
+  getStats,
   triggerSync,
   getSyncStatus,
   getFilterOptions,

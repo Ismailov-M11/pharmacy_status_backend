@@ -1,9 +1,8 @@
 const db = require("../db");
 
-async function getAllOsonPharmacies(filters = {}) {
+function buildFilterWhere(filters) {
   const { status, parentRegion, region, search } = filters;
-
-  let query = "SELECT * FROM oson_pharmacies WHERE 1=1";
+  let where = "WHERE 1=1";
   const params = [];
   let idx = 1;
 
@@ -11,9 +10,8 @@ async function getAllOsonPharmacies(filters = {}) {
     const statusArray = (Array.isArray(status) ? status : status.split(","))
       .map((s) => s.trim())
       .filter((s) => s && s !== "all");
-
     if (statusArray.length > 0) {
-      query += ` AND oson_status = ANY($${idx++})`;
+      where += ` AND oson_status = ANY($${idx++})`;
       params.push(statusArray);
     }
   }
@@ -22,9 +20,8 @@ async function getAllOsonPharmacies(filters = {}) {
     const prArray = (Array.isArray(parentRegion) ? parentRegion : parentRegion.split(","))
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean);
-
     if (prArray.length > 0) {
-      query += ` AND (LOWER(parent_region_ru) = ANY($${idx}) OR LOWER(parent_region_uz) = ANY($${idx}))`;
+      where += ` AND (LOWER(parent_region_ru) = ANY($${idx}) OR LOWER(parent_region_uz) = ANY($${idx}))`;
       params.push(prArray);
       idx++;
     }
@@ -34,24 +31,45 @@ async function getAllOsonPharmacies(filters = {}) {
     const rArray = (Array.isArray(region) ? region : region.split(","))
       .map((s) => s.trim().toLowerCase())
       .filter(Boolean);
-
     if (rArray.length > 0) {
-      query += ` AND (LOWER(region_ru) = ANY($${idx}) OR LOWER(region_uz) = ANY($${idx}))`;
+      where += ` AND (LOWER(region_ru) = ANY($${idx}) OR LOWER(region_uz) = ANY($${idx}))`;
       params.push(rArray);
       idx++;
     }
   }
 
   if (search) {
-    query += ` AND (LOWER(name_ru) LIKE LOWER($${idx}) OR LOWER(name_uz) LIKE LOWER($${idx}) OR LOWER(address_ru) LIKE LOWER($${idx}) OR slug LIKE LOWER($${idx}))`;
+    where += ` AND (LOWER(name_ru) LIKE LOWER($${idx}) OR LOWER(name_uz) LIKE LOWER($${idx}) OR LOWER(address_ru) LIKE LOWER($${idx}) OR slug LIKE LOWER($${idx}))`;
     params.push(`%${search}%`);
     idx++;
   }
 
-  query += " ORDER BY name_ru ASC";
+  return { where, params, nextIdx: idx };
+}
 
+async function getAllOsonPharmacies(filters = {}) {
+  const { where, params } = buildFilterWhere(filters);
+  const query = `SELECT * FROM oson_pharmacies ${where} ORDER BY name_ru ASC`;
   const result = await db.query(query, params);
   return result.rows;
+}
+
+async function getOsonPharmaciesPaginated(filters = {}, page = 0, size = 100) {
+  const { where, params, nextIdx } = buildFilterWhere(filters);
+
+  const countResult = await db.query(
+    `SELECT COUNT(*) AS total FROM oson_pharmacies ${where}`,
+    params
+  );
+  const total = parseInt(countResult.rows[0].total) || 0;
+
+  const dataParams = [...params, size, page * size];
+  const dataResult = await db.query(
+    `SELECT * FROM oson_pharmacies ${where} ORDER BY name_ru ASC LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
+    dataParams
+  );
+
+  return { data: dataResult.rows, total };
 }
 
 async function getDistinctParentRegions() {
@@ -233,6 +251,7 @@ async function getSyncStats() {
 
 module.exports = {
   getAllOsonPharmacies,
+  getOsonPharmaciesPaginated,
   getDistinctParentRegions,
   getDistinctRegions,
   getPharmacyBySlug,
