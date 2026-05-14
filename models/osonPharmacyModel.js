@@ -1,9 +1,5 @@
 const db = require("../db");
 
-/**
- * Get all OSON pharmacies with optional filters
- * @param {Object} filters - { status, parentRegion, region, search }
- */
 async function getAllOsonPharmacies(filters = {}) {
   const { status, parentRegion, region, search } = filters;
 
@@ -12,7 +8,6 @@ async function getAllOsonPharmacies(filters = {}) {
   let idx = 1;
 
   if (status && status !== "all") {
-    // Check if status is "connected,not_connected" and filter accordingly
     const statusArray = (Array.isArray(status) ? status : status.split(","))
       .map((s) => s.trim())
       .filter((s) => s && s !== "all");
@@ -59,9 +54,6 @@ async function getAllOsonPharmacies(filters = {}) {
   return result.rows;
 }
 
-/**
- * Get distinct parent regions for filter dropdown
- */
 async function getDistinctParentRegions() {
   const result = await db.query(
     "SELECT DISTINCT parent_region_ru, parent_region_uz FROM oson_pharmacies WHERE parent_region_ru IS NOT NULL ORDER BY parent_region_ru"
@@ -69,9 +61,6 @@ async function getDistinctParentRegions() {
   return result.rows;
 }
 
-/**
- * Get distinct districts for filter dropdown (optionally filtered by parent region)
- */
 async function getDistinctRegions(parentRegion = null) {
   let query =
     "SELECT DISTINCT region_ru, region_uz FROM oson_pharmacies WHERE region_ru IS NOT NULL";
@@ -94,9 +83,6 @@ async function getDistinctRegions(parentRegion = null) {
   return result.rows;
 }
 
-/**
- * Get a single pharmacy by slug
- */
 async function getPharmacyBySlug(slug) {
   const result = await db.query(
     "SELECT * FROM oson_pharmacies WHERE slug = $1",
@@ -105,11 +91,6 @@ async function getPharmacyBySlug(slug) {
   return result.rows[0] || null;
 }
 
-/**
- * Upsert (INSERT or UPDATE) a pharmacy record by slug
- * Does NOT overwrite oson_status if already set to 'connected' or 'deleted'
- * newStatus is the proposed new status ('connected' or 'not_connected')
- */
 async function upsertPharmacy(slug, data, newStatus) {
   const {
     name_ru,
@@ -134,8 +115,6 @@ async function upsertPharmacy(slug, data, newStatus) {
     oson_synced_time,
   } = data;
 
-  // On conflict: update data fields and last_synced_at
-  // Status update logic handled separately via updateStatus()
   const query = `
     INSERT INTO oson_pharmacies (
       slug, name_ru, name_uz, parent_region_ru, parent_region_uz,
@@ -202,8 +181,22 @@ async function upsertPharmacy(slug, data, newStatus) {
 }
 
 /**
- * Update only the oson_status of a pharmacy
+ * Update oson_status, last_synced_at, and oson_synced_time for an existing pharmacy.
+ * osonSyncedTime is applied only when non-null (COALESCE keeps existing value otherwise).
  */
+async function updateStatusAndSyncedTime(slug, newStatus, osonSyncedTime) {
+  const result = await db.query(
+    `UPDATE oson_pharmacies
+     SET oson_status = $1,
+         last_synced_at = NOW(),
+         oson_synced_time = COALESCE($3, oson_synced_time)
+     WHERE slug = $2
+     RETURNING *`,
+    [newStatus, slug, osonSyncedTime || null]
+  );
+  return result.rows[0];
+}
+
 async function updateStatus(slug, newStatus) {
   const result = await db.query(
     "UPDATE oson_pharmacies SET oson_status = $1, last_synced_at = NOW() WHERE slug = $2 RETURNING *",
@@ -212,16 +205,10 @@ async function updateStatus(slug, newStatus) {
   return result.rows[0];
 }
 
-/**
- * Delete a pharmacy by slug (used for 'not_connected' ones that disappeared from OSON)
- */
 async function deletePharmacy(slug) {
   await db.query("DELETE FROM oson_pharmacies WHERE slug = $1", [slug]);
 }
 
-/**
- * Get all slugs currently in the DB
- */
 async function getAllSlugsWithStatus() {
   const result = await db.query(
     "SELECT slug, oson_status FROM oson_pharmacies"
@@ -231,9 +218,6 @@ async function getAllSlugsWithStatus() {
   return map;
 }
 
-/**
- * Get sync stats summary
- */
 async function getSyncStats() {
   const result = await db.query(`
     SELECT 
@@ -253,6 +237,7 @@ module.exports = {
   getDistinctRegions,
   getPharmacyBySlug,
   upsertPharmacy,
+  updateStatusAndSyncedTime,
   updateStatus,
   deletePharmacy,
   getAllSlugsWithStatus,
