@@ -238,7 +238,7 @@ async function getAllSlugsWithStatus() {
 
 async function getSyncStats() {
   const result = await db.query(`
-    SELECT 
+    SELECT
       COUNT(*) AS total,
       COUNT(*) FILTER (WHERE oson_status = 'connected') AS connected,
       COUNT(*) FILTER (WHERE oson_status = 'not_connected') AS not_connected,
@@ -246,6 +246,22 @@ async function getSyncStats() {
       MAX(last_synced_at) AS last_synced_at
     FROM oson_pharmacies
   `);
+  return result.rows[0];
+}
+
+async function getFilteredStats(filters = {}) {
+  // Build WHERE without the status filter so breakdown by status is always shown
+  const filtersWithoutStatus = { ...filters, status: "all" };
+  const { where, params } = buildFilterWhere(filtersWithoutStatus);
+  const result = await db.query(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE oson_status = 'connected') AS connected,
+      COUNT(*) FILTER (WHERE oson_status = 'not_connected') AS not_connected,
+      COUNT(*) FILTER (WHERE oson_status = 'deleted') AS deleted,
+      MAX(last_synced_at) AS last_synced_at
+    FROM oson_pharmacies ${where}
+  `, params);
   return result.rows[0];
 }
 
@@ -261,4 +277,5 @@ module.exports = {
   deletePharmacy,
   getAllSlugsWithStatus,
   getSyncStats,
+  getFilteredStats,
 };

@@ -51,10 +51,22 @@ async function getData(req, res) {
 /**
  * GET /api/oson/stats
  * Returns aggregate counts and last sync time.
+ * Accepts the same filter params as /data (parentRegion, region, search)
+ * to return filtered counts. Status breakdown is always shown regardless of status filter.
  */
 async function getStats(req, res) {
   try {
-    const stats = await osonModel.getSyncStats();
+    const { parentRegion, region, search } = req.query;
+    const hasFilter = parentRegion || region || search;
+
+    const stats = hasFilter
+      ? await osonModel.getFilteredStats({
+          parentRegion: parentRegion || null,
+          region: region || null,
+          search: search || null,
+        })
+      : await osonModel.getSyncStats();
+
     res.json({
       total: parseInt(stats.total) || 0,
       connected: parseInt(stats.connected) || 0,
