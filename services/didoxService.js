@@ -3,7 +3,7 @@ const db = require("../db");
 
 const BASE = process.env.DIDOX_BASE_URL || "https://api-partners.didox.uz";
 const PARTNER_TOKEN = process.env.DIDOX_PARTNER_TOKEN;
-const TIN = process.env.DIDOX_TIN;
+const AUTH_PINFL = process.env.DIDOX_AUTH_PINFL;   // ПИНФЛ физлица — для /auth
 const PASSWORD = process.env.DIDOX_PASSWORD;
 
 // In-memory fast cache
@@ -86,12 +86,12 @@ async function isBlocked() {
 }
 
 async function fetchNewUserKey() {
-  if (!PARTNER_TOKEN || !PASSWORD) {
-    console.warn("Didox: missing DIDOX_PARTNER_TOKEN or DIDOX_PASSWORD");
+  if (!PARTNER_TOKEN || !AUTH_PINFL || !PASSWORD) {
+    console.warn("Didox: missing DIDOX_PARTNER_TOKEN, DIDOX_AUTH_PINFL or DIDOX_PASSWORD");
     return null;
   }
   const res = await axios.post(
-    `${BASE}/v1/auth/${TIN}/password/ru`,
+    `${BASE}/v1/auth/${AUTH_PINFL}/password/ru`,
     { password: PASSWORD },
     { headers: { "Partner-Authorization": PARTNER_TOKEN, "Content-Type": "application/json" } }
   );
