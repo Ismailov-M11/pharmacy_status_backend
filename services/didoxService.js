@@ -1,35 +1,100 @@
 const axios = require("axios");
+const db = require("../db");
 
 const BASE = process.env.DIDOX_BASE_URL || "https://api-partners.didox.uz";
 const PARTNER_TOKEN = process.env.DIDOX_PARTNER_TOKEN;
 const TIN = process.env.DIDOX_TIN;
 const PASSWORD = process.env.DIDOX_PASSWORD;
 
-let cachedUserKey = null;
-let userKeyExpiresAt = 0;
+// In-memory fast cache — populated from DB on first use
+let memKey = null;
+let memExpiresAt = 0;
 
-async function getUserKey() {
-  const now = Date.now();
-  if (cachedUserKey && now < userKeyExpiresAt) return cachedUserKey;
+const KEY_TOKEN = "didox_user_key";
+const KEY_EXPIRES = "didox_user_key_expires_at";
+// Lifetime: 4 hours (Didox sessions last several hours; we renew well before expiry)
+const TTL_MS = 4 * 60 * 60 * 1000;
 
+async function readFromDb() {
+  try {
+    const r = await db.query(
+      "SELECT key, value FROM app_settings WHERE key = ANY($1)",
+      [[KEY_TOKEN, KEY_EXPIRES]]
+    );
+    const map = Object.fromEntries(r.rows.map((row) => [row.key, row.value]));
+    const token = map[KEY_TOKEN] || null;
+    const expiresAt = parseInt(map[KEY_EXPIRES] || "0", 10);
+    return { token, expiresAt };
+  } catch {
+    return { token: null, expiresAt: 0 };
+  }
+}
+
+async function writeToDb(token, expiresAt) {
+  try {
+    await db.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [KEY_TOKEN, token]
+    );
+    await db.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [KEY_EXPIRES, String(expiresAt)]
+    );
+  } catch (e) {
+    console.warn("Didox: failed to persist user-key to DB:", e.message);
+  }
+}
+
+async function fetchNewUserKey() {
   if (!PARTNER_TOKEN || !PASSWORD) {
     console.warn("Didox: missing DIDOX_PARTNER_TOKEN or DIDOX_PASSWORD");
     return null;
   }
+  const res = await axios.post(
+    `${BASE}/v1/auth/${TIN}/password/ru`,
+    { password: PASSWORD },
+    { headers: { "Partner-Authorization": PARTNER_TOKEN, "Content-Type": "application/json" } }
+  );
+  return res.data?.token || null;
+}
 
+async function getUserKey() {
+  const now = Date.now();
+
+  // 1. In-memory hit
+  if (memKey && now < memExpiresAt) return memKey;
+
+  // 2. DB hit
+  const { token: dbToken, expiresAt: dbExpires } = await readFromDb();
+  if (dbToken && now < dbExpires) {
+    memKey = dbToken;
+    memExpiresAt = dbExpires;
+    return memKey;
+  }
+
+  // 3. Need a fresh token — call Didox
   try {
-    const res = await axios.post(
-      `${BASE}/v1/auth/${TIN}/password/ru`,
-      { password: PASSWORD },
-      { headers: { "Partner-Authorization": PARTNER_TOKEN, "Content-Type": "application/json" } }
-    );
-    cachedUserKey = res.data?.token;
-    userKeyExpiresAt = now + 5 * 60 * 60 * 1000;
-    return cachedUserKey;
+    const newToken = await fetchNewUserKey();
+    if (!newToken) return null;
+
+    const expiresAt = now + TTL_MS;
+    memKey = newToken;
+    memExpiresAt = expiresAt;
+    await writeToDb(newToken, expiresAt);
+    console.log("Didox: obtained new user-key, valid until", new Date(expiresAt).toISOString());
+    return memKey;
   } catch (e) {
     console.error("Didox auth failed:", e.response?.data || e.message);
     return null;
   }
+}
+
+async function invalidateUserKey() {
+  memKey = null;
+  memExpiresAt = 0;
+  await writeToDb("", 0);
 }
 
 function buildHeaders(userKey) {
@@ -49,17 +114,11 @@ async function getContractStatusByTin(tin) {
       params: { owner: 1, partner: tin, doctype: "000", page: 1, limit: 20 },
       headers: buildHeaders(userKey),
     });
-
-    const list = (res.data?.data || []).filter(
-      (d) => d.doctype === "000" && d.subtype === 3
-    );
-    if (list.length === 0) return null;
-
-    const actual = list.sort((a, b) => (b.created_unix || 0) - (a.created_unix || 0))[0];
-    return extractFields(actual);
+    return pickActual(res.data?.data);
   } catch (e) {
     if (e.response?.status === 401) {
-      cachedUserKey = null;
+      // Token expired — invalidate and retry once
+      await invalidateUserKey();
       const uk = await getUserKey();
       if (uk) {
         try {
@@ -67,10 +126,7 @@ async function getContractStatusByTin(tin) {
             params: { owner: 1, partner: tin, doctype: "000", page: 1, limit: 20 },
             headers: buildHeaders(uk),
           });
-          const list2 = (res2.data?.data || []).filter((d) => d.doctype === "000" && d.subtype === 3);
-          if (list2.length === 0) return null;
-          const actual2 = list2.sort((a, b) => (b.created_unix || 0) - (a.created_unix || 0))[0];
-          return extractFields(actual2);
+          return pickActual(res2.data?.data);
         } catch (e2) {
           console.error("Didox retry failed:", e2.response?.data || e2.message);
           return null;
@@ -82,14 +138,17 @@ async function getContractStatusByTin(tin) {
   }
 }
 
-function extractFields(doc) {
+function pickActual(data) {
+  const list = (data || []).filter((d) => d.doctype === "000" && d.subtype === 3);
+  if (!list.length) return null;
+  const actual = list.sort((a, b) => (b.created_unix || 0) - (a.created_unix || 0))[0];
   return {
-    doc_id: doc.doc_id,
-    doc_status: doc.doc_status,
-    contract_number: doc.name || doc.contract_number || null,
-    partner_company: doc.partnerCompany || null,
-    status_comment: doc.status_comment || null,
-    created_unix: doc.created_unix || null,
+    doc_id: actual.doc_id,
+    doc_status: actual.doc_status,
+    contract_number: actual.name || actual.contract_number || null,
+    partner_company: actual.partnerCompany || null,
+    status_comment: actual.status_comment || null,
+    created_unix: actual.created_unix || null,
   };
 }
 

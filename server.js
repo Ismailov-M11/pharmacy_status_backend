@@ -130,6 +130,15 @@ async function initializeDatabase() {
     );
     `);
 
+    // Key-value store for persistent app settings (e.g. Didox session token)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key        VARCHAR(100) PRIMARY KEY,
+        value      TEXT,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     // Create pharmacy_contracts table for caching Didox contract status by TIN
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pharmacy_contracts (
