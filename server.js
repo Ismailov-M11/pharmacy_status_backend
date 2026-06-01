@@ -3,6 +3,7 @@ const cors = require("cors");
 const { Pool } = require("pg");
 const statusRoutes = require("./routes/statusRoutes");
 const osonRoutes = require("./routes/osonRoutes");
+const contractRoutes = require("./routes/contractRoutes");
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use(express.json());
 
 app.use("/api/status", statusRoutes);
 app.use("/api/oson", osonRoutes);
+app.use("/api/contracts", contractRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -126,6 +128,24 @@ async function initializeDatabase() {
       changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       comment TEXT
     );
+    `);
+
+    // Create pharmacy_contracts table for caching Didox contract status by TIN
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pharmacy_contracts (
+        id              SERIAL PRIMARY KEY,
+        tin             VARCHAR(20) UNIQUE NOT NULL,
+        doc_id          VARCHAR(64),
+        doc_status      INTEGER,
+        contract_number VARCHAR(50),
+        partner_company TEXT,
+        status_comment  TEXT,
+        created_unix    BIGINT,
+        last_checked_at TIMESTAMP DEFAULT NOW(),
+        updated_at      TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_contracts_tin ON pharmacy_contracts(tin);
+      CREATE INDEX IF NOT EXISTS idx_contracts_status ON pharmacy_contracts(doc_status);
     `);
 
     // Create user_column_settings table for storing user preferences
@@ -263,6 +283,10 @@ initializeDatabase().then(() => {
   // Start OSON Cron Sync (daily at 12:00 Tashkent time)
   const osonSyncService = require('./services/osonSyncService');
   osonSyncService.startOsonCron();
+
+  // Start Didox contract status polling (every 5 minutes)
+  const didoxPolling = require('./services/didoxPollingService');
+  didoxPolling.startDidoxCron();
 
   app.listen(PORT, () => {
     console.log(`Backend running on port ${PORT} `);
