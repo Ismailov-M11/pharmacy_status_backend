@@ -38,7 +38,7 @@ async function getContractLinks(req, res) {
     res.json({
       doc_id: cached.doc_id,
       downloadUrl: `/api/contracts/${encodeURIComponent(tin)}/pdf`,
-      copyUrl: `https://didox.uz/documents/${cached.doc_id}/1`,
+      copyUrl: `https://api.didox.uz/v1/documents/${cached.doc_id}/pdf/shartnoma`,
     });
   } catch (e) {
     console.error("getContractLinks error:", e.message);
