@@ -14,9 +14,10 @@ async function getContract(req, res) {
     }
 
     const cached = await contractModel.getContractByTin(tin);
-    if (cached) return res.json(toApi(cached));
+    // Serve cache only if we actually have a real contract (doc_id present)
+    if (cached?.doc_id) return res.json(toApi(cached));
 
-    // Not cached yet — fetch once and store
+    // No cache, or cached as "no contract" — always re-fetch from Didox
     const fresh = await didox.getContractStatusByTin(tin);
     const saved = await contractModel.upsertContract(tin, fresh);
     return res.json(toApi(saved));
