@@ -54,7 +54,14 @@ async function getPharmacyBatchData(req, res) {
 
     const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
     const marketIds = [...new Set(items.map(i => String(i.marketId)).filter(Boolean))];
-    const tins = [...new Set(items.map(i => i.tin).filter(Boolean))];
+    const tins = [...new Set(
+      items.map(i => i.tin ? String(i.tin).replace(/\s+/g, "") : null).filter(Boolean)
+    )];
+    // Нормализуем TIN в самих items тоже
+    items = items.map(i => ({
+      ...i,
+      tin: i.tin ? String(i.tin).replace(/\s+/g, "") : null,
+    }));
 
     // ── 1. training + brandedPacket ──────────────────────────────────────────
     const statusMap = {};

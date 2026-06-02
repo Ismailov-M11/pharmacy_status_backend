@@ -164,6 +164,7 @@ function buildHeaders(userKey) {
 }
 
 async function getContractStatusByTin(tin) {
+  tin = String(tin).replace(/\s+/g, ""); // убираем все пробелы (начало, конец, середина)
   log(`getContractStatusByTin(${tin}) → start`);
 
   if (await isBlocked()) {
