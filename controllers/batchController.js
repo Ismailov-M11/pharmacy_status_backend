@@ -47,21 +47,20 @@ function refreshStaleContractsAsync(tins) {
 // Header: Authorization: Bearer <davo-token>
 async function getPharmacyBatchData(req, res) {
   try {
-    const { items, refresh = false } = req.body;
-    if (!Array.isArray(items) || items.length === 0) {
+    const { items: rawItems, refresh = false } = req.body;
+    if (!Array.isArray(rawItems) || rawItems.length === 0) {
       return res.json({});
     }
 
-    const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
-    const marketIds = [...new Set(items.map(i => String(i.marketId)).filter(Boolean))];
-    const tins = [...new Set(
-      items.map(i => i.tin ? String(i.tin).replace(/\s+/g, "") : null).filter(Boolean)
-    )];
-    // Нормализуем TIN в самих items тоже
-    items = items.map(i => ({
+    // Нормализуем TIN сразу — убираем все пробелы
+    const items = rawItems.map(i => ({
       ...i,
       tin: i.tin ? String(i.tin).replace(/\s+/g, "") : null,
     }));
+
+    const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+    const marketIds = [...new Set(items.map(i => String(i.marketId)).filter(Boolean))];
+    const tins = [...new Set(items.map(i => i.tin).filter(Boolean))];
 
     // ── 1. training + brandedPacket ──────────────────────────────────────────
     const statusMap = {};
