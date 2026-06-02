@@ -143,7 +143,14 @@ async function getPharmacyBatchData(req, res) {
 
     // ── 4. Merge ─────────────────────────────────────────────────────────────
     const result = {};
+    // Отдельный map контрактов для лидов без marketId (чистые лиды)
+    const contractsByTin = {};
+
     for (const item of items) {
+      if (item.tin && contractMap[item.tin]) {
+        contractsByTin[item.tin] = contractMap[item.tin];
+      }
+
       if (!item.marketId) continue;
       const status = statusMap[String(item.marketId)] || { training: false, brandedPacket: false };
       result[item.marketId] = {
@@ -155,7 +162,7 @@ async function getPharmacyBatchData(req, res) {
     }
 
     // Отвечаем клиенту сразу, затем обновляем устаревшие/отсутствующие TIN-ы
-    res.json(result);
+    res.json({ ...result, _contractsByTin: contractsByTin });
     refreshStaleContractsAsync([...new Set(tinsNeedingRefresh)]);
 
   } catch (e) {
