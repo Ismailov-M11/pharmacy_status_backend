@@ -203,7 +203,7 @@ async function getContractStatusByTin(tin) {
 }
 
 function pickActual(data) {
-  const list = (data || []).filter((d) => d.doctype === "000" && d.subtype === 3);
+  const list = (data || []).filter((d) => d.doctype === "000" && [1, 3, 4].includes(d.doc_status));
   if (!list.length) return null;
   const actual = list.sort((a, b) => (b.created_unix || 0) - (a.created_unix || 0))[0];
   return {
