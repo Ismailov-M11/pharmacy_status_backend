@@ -4,6 +4,7 @@ const { Pool } = require("pg");
 const statusRoutes = require("./routes/statusRoutes");
 const osonRoutes = require("./routes/osonRoutes");
 const contractRoutes = require("./routes/contractRoutes");
+const batchRoutes = require("./routes/batchRoutes");
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use(express.json());
 app.use("/api/status", statusRoutes);
 app.use("/api/oson", osonRoutes);
 app.use("/api/contracts", contractRoutes);
+app.use("/api/batch", batchRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
