@@ -9,22 +9,21 @@ const PASSWORD = process.env.DIDOX_PASSWORD;
 // In-memory fast cache
 let memKey = null;
 let memExpiresAt = 0;
-let memBlockedUntil = 0; // timestamp until which ALL Didox requests are suspended
+let memBlockedUntil = 0;
 
 const KEY_TOKEN = "didox_user_key";
 const KEY_EXPIRES = "didox_user_key_expires_at";
 const KEY_BLOCKED = "didox_blocked_until";
-const TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+const TTL_MS = 4 * 60 * 60 * 1000;
 
-// Parse "Слишком много попыток. Попробуйте через 33 минут. 47 секунд"
-// Returns wait ms, or null if not parseable
+function log(...args)  { console.log ("[Didox]", ...args); }
+function warn(...args) { console.warn("[Didox]", ...args); }
+function err(...args)  { console.error("[Didox]", ...args); }
+
 function parseRetryAfterMs(message) {
   if (!message) return null;
   const m = message.match(/через\s+(\d+)\s+минут[а-яё]*\.?\s*(\d+)\s+секунд/i);
-  if (m) {
-    return (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) * 1000;
-  }
-  // fallback: only minutes
+  if (m) return (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) * 1000;
   const m2 = message.match(/через\s+(\d+)\s+минут/i);
   if (m2) return parseInt(m2[1], 10) * 60 * 1000;
   return null;
@@ -55,69 +54,76 @@ async function setSetting(key, value) {
       [key, String(value)]
     );
   } catch (e) {
-    console.warn(`Didox: failed to persist ${key} to DB:`, e.message);
+    warn(`failed to persist ${key} to DB:`, e.message);
   }
 }
 
-// Call this whenever we receive a 429. Stores blockedUntil in memory + DB.
 async function handleRateLimit(errorMessage) {
   const waitMs = parseRetryAfterMs(errorMessage);
-  // Add 30s buffer so we don't hit the edge
   const blockedUntil = Date.now() + (waitMs || 10 * 60 * 1000) + 30_000;
   memBlockedUntil = blockedUntil;
   await setSetting(KEY_BLOCKED, blockedUntil);
-  console.warn(
-    `Didox: rate-limited. All requests suspended until ${new Date(blockedUntil).toISOString()}`
-  );
+  warn(`rate-limited. Suspended until ${new Date(blockedUntil).toISOString()}`);
 }
 
-// Returns true if currently blocked by rate limit
 async function isBlocked() {
   const now = Date.now();
   if (memBlockedUntil > now) return true;
-
-  // Check DB in case memBlockedUntil was reset by restart
   const { blockedUntil } = await readFromDb();
   if (blockedUntil > now) {
-    memBlockedUntil = blockedUntil; // restore into memory
+    memBlockedUntil = blockedUntil;
     return true;
   }
   return false;
 }
 
 async function fetchNewUserKey() {
+  // ── ENV check ────────────────────────────────────────────────────────────
+  log(`ENV check → TIN=${TIN ? TIN : "MISSING"} | PASSWORD=${PASSWORD ? "SET" : "MISSING"} | PARTNER_TOKEN=${PARTNER_TOKEN ? "SET" : "MISSING"}`);
+
   if (!TIN || !PASSWORD) {
-    console.warn("Didox: missing DIDOX_TIN or DIDOX_PASSWORD");
+    warn("DIDOX_TIN or DIDOX_PASSWORD not set in environment — cannot authenticate");
     return null;
   }
+
+  const url = `${BASE}/v1/auth/${TIN}/password/ru`;
+  log(`POST ${url}`);
+
   const res = await axios.post(
-    `${BASE}/v1/auth/${TIN}/password/ru`,
+    url,
     { password: PASSWORD },
     { headers: { "Content-Type": "application/json" } }
   );
-  return res.data?.token || null;
+
+  const token = res.data?.token || null;
+  log(`Auth response → token=${token ? token.slice(0, 8) + "..." : "NULL"}`);
+  return token;
 }
 
 async function getUserKey() {
   const now = Date.now();
 
-  // 1. In-memory hit
-  if (memKey && now < memExpiresAt) return memKey;
+  if (memKey && now < memExpiresAt) {
+    log(`getUserKey → in-memory hit (expires ${new Date(memExpiresAt).toISOString()})`);
+    return memKey;
+  }
 
-  // 2. DB hit (also loads blockedUntil into memory)
   const { token: dbToken, expiresAt: dbExpires, blockedUntil: dbBlocked } = await readFromDb();
+
   if (dbBlocked > now) {
     memBlockedUntil = dbBlocked;
-    console.warn(`Didox: still rate-limited until ${new Date(dbBlocked).toISOString()}, skipping auth`);
+    warn(`rate-limited until ${new Date(dbBlocked).toISOString()}, skipping auth`);
     return null;
   }
+
   if (dbToken && now < dbExpires) {
+    log(`getUserKey → DB hit (expires ${new Date(dbExpires).toISOString()})`);
     memKey = dbToken;
     memExpiresAt = dbExpires;
     return memKey;
   }
 
-  // 3. Need a fresh token
+  log("getUserKey → no valid token in memory or DB, fetching new one...");
   try {
     const newToken = await fetchNewUserKey();
     if (!newToken) return null;
@@ -127,7 +133,7 @@ async function getUserKey() {
     memExpiresAt = expiresAt;
     await setSetting(KEY_TOKEN, newToken);
     await setSetting(KEY_EXPIRES, expiresAt);
-    console.log("Didox: obtained new user-key, valid until", new Date(expiresAt).toISOString());
+    log(`new user-key obtained, valid until ${new Date(expiresAt).toISOString()}`);
     return memKey;
   } catch (e) {
     const status = e.response?.status;
@@ -135,13 +141,14 @@ async function getUserKey() {
     if (status === 429) {
       await handleRateLimit(msg);
     } else {
-      console.error("Didox auth failed:", e.response?.data || e.message);
+      err("auth failed:", status, msg);
     }
     return null;
   }
 }
 
 async function invalidateUserKey() {
+  log("invalidating user-key (401 received)");
   memKey = null;
   memExpiresAt = 0;
   await setSetting(KEY_TOKEN, "");
@@ -157,21 +164,39 @@ function buildHeaders(userKey) {
 }
 
 async function getContractStatusByTin(tin) {
-  // Block check before every request
-  if (await isBlocked()) return null;
+  log(`getContractStatusByTin(${tin}) → start`);
+
+  if (await isBlocked()) {
+    warn(`getContractStatusByTin(${tin}) → blocked by rate-limit, skipping`);
+    return null;
+  }
 
   const userKey = await getUserKey();
-  if (!userKey) return null;
+  if (!userKey) {
+    warn(`getContractStatusByTin(${tin}) → no user-key, returning null`);
+    return null;
+  }
+
+  const url = `${BASE}/v2/documents`;
+  const params = { owner: 1, partner: tin, doctype: "000", page: 1, limit: 20 };
+  log(`GET ${url} params=${JSON.stringify(params)}`);
 
   try {
-    const res = await axios.get(`${BASE}/v2/documents`, {
-      params: { owner: 1, partner: tin, doctype: "000", page: 1, limit: 20 },
-      headers: buildHeaders(userKey),
-    });
-    return pickActual(res.data?.data);
+    const res = await axios.get(url, { params, headers: buildHeaders(userKey) });
+    const rawData = res.data?.data || [];
+    log(`getContractStatusByTin(${tin}) → Didox returned ${rawData.length} docs`);
+    rawData.forEach((d, i) =>
+      log(`  doc[${i}] doc_id=${d.doc_id} doc_status=${d.doc_status} doctype=${d.doctype} subtype=${d.subtype}`)
+    );
+
+    const result = pickActual(rawData);
+    log(`getContractStatusByTin(${tin}) → picked: ${result ? `doc_status=${result.doc_status}` : "null (no matching docs)"}`);
+    return result;
   } catch (e) {
     const status = e.response?.status;
     const msg = e.response?.data?.error?.message || e.message;
+
+    err(`getContractStatusByTin(${tin}) → HTTP ${status}: ${msg}`);
 
     if (status === 429) {
       await handleRateLimit(msg);
@@ -183,21 +208,18 @@ async function getContractStatusByTin(tin) {
       const uk = await getUserKey();
       if (uk) {
         try {
-          const res2 = await axios.get(`${BASE}/v2/documents`, {
-            params: { owner: 1, partner: tin, doctype: "000", page: 1, limit: 20 },
-            headers: buildHeaders(uk),
-          });
+          log(`getContractStatusByTin(${tin}) → retry after 401`);
+          const res2 = await axios.get(url, { params, headers: buildHeaders(uk) });
           return pickActual(res2.data?.data);
         } catch (e2) {
-          const status2 = e2.response?.status;
-          const msg2 = e2.response?.data?.error?.message || e2.message;
-          if (status2 === 429) await handleRateLimit(msg2);
-          else console.error("Didox retry failed:", e2.response?.data || e2.message);
+          const s2 = e2.response?.status;
+          const m2 = e2.response?.data?.error?.message || e2.message;
+          if (s2 === 429) await handleRateLimit(m2);
+          else err(`retry failed: HTTP ${s2}: ${m2}`);
           return null;
         }
       }
     }
-    console.error(`Didox getContractStatusByTin(${tin}) failed:`, e.response?.data || e.message);
     return null;
   }
 }
@@ -218,7 +240,6 @@ function pickActual(data) {
 
 async function downloadContractPdf(docId) {
   if (await isBlocked()) return null;
-
   const userKey = await getUserKey();
   if (!userKey) return null;
   try {
@@ -231,12 +252,11 @@ async function downloadContractPdf(docId) {
     const status = e.response?.status;
     const msg = e.response?.data?.error?.message || e.message;
     if (status === 429) await handleRateLimit(msg);
-    else console.error(`Didox downloadContractPdf(${docId}) failed:`, e.message);
+    else err(`downloadContractPdf(${docId}) failed: HTTP ${status}: ${msg}`);
     return null;
   }
 }
 
-// Exported for testing/debug: how long until block expires (ms), 0 if not blocked
 async function getBlockedMs() {
   if (await isBlocked()) return Math.max(0, memBlockedUntil - Date.now());
   return 0;

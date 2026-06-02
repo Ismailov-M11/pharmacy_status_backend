@@ -1,10 +1,13 @@
 const axios = require("axios");
 const db = require("../db");
+const didox = require("../services/didoxService");
+const contractModel = require("../models/contractModel");
 
 const DAVO_API = "https://api.davodelivery.uz/api";
-const SESSION_CONCURRENCY = 30; // parallel session-list calls per chunk
+const SESSION_CONCURRENCY = 30;
 
 function toContractApi(row) {
+  if (!row) return null;
   const map = {
     1: { status: "pending",  label: "Ожидает",  color: "amber" },
     3: { status: "signed",   label: "Подписан", color: "emerald" },
@@ -21,22 +24,39 @@ function toContractApi(row) {
   };
 }
 
+// Фоновое обновление кэша для TIN-ов без записи или с doc_id=null.
+// Запускается после ответа клиенту (fire-and-forget).
+function refreshStaleContractsAsync(tins) {
+  if (!tins.length) return;
+  setImmediate(async () => {
+    for (const tin of tins) {
+      try {
+        const fresh = await didox.getContractStatusByTin(tin);
+        await contractModel.upsertContract(tin, fresh);
+      } catch {
+        // ignore — next cron will retry
+      }
+      // небольшая пауза между запросами чтобы не триггерить 429
+      await new Promise(r => setTimeout(r, 300));
+    }
+  });
+}
+
 // POST /api/batch/pharmacy-data
-// Body: { items: [{marketId: number|null, tin: string|null}] }
+// Body: { items: [{marketId, tin}], refresh?: boolean }
 // Header: Authorization: Bearer <davo-token>
 async function getPharmacyBatchData(req, res) {
   try {
-    const { items } = req.body;
+    const { items, refresh = false } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.json({});
     }
 
     const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
-
     const marketIds = [...new Set(items.map(i => String(i.marketId)).filter(Boolean))];
     const tins = [...new Set(items.map(i => i.tin).filter(Boolean))];
 
-    // ── 1. Batch: training + brandedPacket from pharmacy_status ──────────────
+    // ── 1. training + brandedPacket ──────────────────────────────────────────
     const statusMap = {};
     if (marketIds.length) {
       const r = await db.query(
@@ -51,19 +71,42 @@ async function getPharmacyBatchData(req, res) {
       });
     }
 
-    // ── 2. Batch: contract status from pharmacy_contracts ────────────────────
+    // ── 2. Contracts from cache ──────────────────────────────────────────────
     const contractMap = {};
+    const tinsNeedingRefresh = [];
+
     if (tins.length) {
       const r = await db.query(
-        "SELECT * FROM pharmacy_contracts WHERE tin = ANY($1) AND doc_id IS NOT NULL",
+        "SELECT * FROM pharmacy_contracts WHERE tin = ANY($1)",
         [tins]
       );
+
+      // Порог устаревания: обновляем если данные старше 30 минут
+      const STALE_MS = 30 * 60 * 1000;
+      const now = Date.now();
+
       r.rows.forEach(row => {
-        contractMap[row.tin] = toContractApi(row);
+        const isStale = !row.last_checked_at ||
+          (now - new Date(row.last_checked_at).getTime()) > STALE_MS;
+
+        if (row.doc_id) {
+          contractMap[row.tin] = toContractApi(row);
+          // Если принудительное обновление или данные устарели — перепроверим фоне
+          if (refresh || isStale) tinsNeedingRefresh.push(row.tin);
+        } else {
+          // doc_id=null — нет реального договора, всегда перепроверяем фоново
+          tinsNeedingRefresh.push(row.tin);
+        }
+      });
+
+      // TIN-ы которых вообще нет в таблице
+      const cachedTins = new Set(r.rows.map(row => row.tin));
+      tins.forEach(tin => {
+        if (!cachedTins.has(tin)) tinsNeedingRefresh.push(tin);
       });
     }
 
-    // ── 3. Session-list: proxy to Davo API in parallel chunks ────────────────
+    // ── 3. Session-list (прокси к Davo API) ──────────────────────────────────
     const sessionMap = {};
     const itemsWithMarket = items.filter(i => i.marketId);
 
@@ -92,7 +135,7 @@ async function getPharmacyBatchData(req, res) {
       }
     }
 
-    // ── 4. Merge all results keyed by marketId ───────────────────────────────
+    // ── 4. Merge ─────────────────────────────────────────────────────────────
     const result = {};
     for (const item of items) {
       if (!item.marketId) continue;
@@ -105,9 +148,12 @@ async function getPharmacyBatchData(req, res) {
       };
     }
 
-    return res.json(result);
+    // Отвечаем клиенту сразу, затем обновляем устаревшие/отсутствующие TIN-ы
+    res.json(result);
+    refreshStaleContractsAsync([...new Set(tinsNeedingRefresh)]);
+
   } catch (e) {
-    console.error("batchController error:", e.message);
+    console.error("[Batch] error:", e.message);
     return res.status(500).json({ error: "Batch fetch failed" });
   }
 }
