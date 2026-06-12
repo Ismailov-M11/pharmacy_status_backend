@@ -3,7 +3,7 @@ const cron = require("node-cron");
 const osonModel = require("../models/osonPharmacyModel");
 
 // ─── OSON API Config ───────────────────────────────────────────────────────
-const OSON_API_BASE = "http://134.98.139.47/api/POS";
+const OSON_API_BASE = "https://universities-tan-acceptable-apnic.trycloudflare.com/api/POS";
 const OSON_HEADERS = {
   accept: "application/json",
   UserName: "3@V0@davo",
