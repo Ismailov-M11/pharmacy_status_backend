@@ -3,12 +3,7 @@ const cron = require("node-cron");
 const osonModel = require("../models/osonPharmacyModel");
 
 // ─── OSON API Config ───────────────────────────────────────────────────────
-const OSON_API_BASE = process.env.OSON_API_BASE || "https://ones-module-observations-july.trycloudflare.com/api/POS";
-const OSON_HEADERS = {
-  accept: "application/json",
-  UserName: "3@V0@davo",
-  DeviceTypeId: "0",
-};
+const OSON_API_BASE = process.env.OSON_API_BASE || "https://dev-api.davodelivery.uz/api/oson";
 
 const OSON_REGIONS = [
   "surxondaryo",
@@ -45,15 +40,18 @@ let progressPhase = "";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-async function fetchAllOsonSlugs() {
+async function fetchAllOsonSlugs(davoToken) {
   const allSlugs = new Set();
 
   const results = await Promise.allSettled(
     OSON_REGIONS.map((region) =>
       axios
-        .get(`${OSON_API_BASE}/SlugList`, {
+        .get(`${OSON_API_BASE}/POS/SlugList`, {
           params: { region },
-          headers: OSON_HEADERS,
+          headers: {
+            accept: "application/json",
+            Authorization: `Bearer ${davoToken}`,
+          },
           timeout: 20000,
         })
         .then((res) => {
@@ -84,10 +82,13 @@ async function fetchAllOsonSlugs() {
   return allSlugs;
 }
 
-async function fetchOsonPharmacyDetail(slug) {
+async function fetchOsonPharmacyDetail(slug, davoToken) {
   try {
-    const response = await axios.get(`${OSON_API_BASE}/TileInfo/${slug}`, {
-      headers: OSON_HEADERS,
+    const response = await axios.get(`${OSON_API_BASE}/POS/TileInfo/${slug}`, {
+      headers: {
+        accept: "application/json",
+        Authorization: `Bearer ${davoToken}`,
+      },
       timeout: 10000,
     });
     if (response.data?.Succeeded && response.data?.Data) {
@@ -99,9 +100,9 @@ async function fetchOsonPharmacyDetail(slug) {
   }
 }
 
-async function fetchDetailBatch(slugs) {
+async function fetchDetailBatch(slugs, davoToken) {
   const results = await Promise.allSettled(
-    slugs.map((slug) => fetchOsonPharmacyDetail(slug).then((d) => ({ slug, d })))
+    slugs.map((slug) => fetchOsonPharmacyDetail(slug, davoToken).then((d) => ({ slug, d })))
   );
 
   const map = new Map();
@@ -158,7 +159,7 @@ async function runOsonSync(davoToken) {
 
   try {
     progressPhase = "collecting";
-    const osonSlugs = await fetchAllOsonSlugs();
+    const osonSlugs = await fetchAllOsonSlugs(davoToken);
     const davoSlugs = await fetchDavoConnectedSlugs(davoToken);
     const dbSlugsMap = await osonModel.getAllSlugsWithStatus();
 
@@ -184,7 +185,7 @@ async function runOsonSync(davoToken) {
     // Fetch TileInfo for each batch to get SyncedTime from OSON API.
     for (let i = 0; i < existingSlugs.length; i += DETAIL_BATCH_SIZE) {
       const batch = existingSlugs.slice(i, i + DETAIL_BATCH_SIZE);
-      const detailMap = await fetchDetailBatch(batch);
+      const detailMap = await fetchDetailBatch(batch, davoToken);
 
       await Promise.allSettled(
         batch.map(async (slug) => {
@@ -221,7 +222,7 @@ async function runOsonSync(davoToken) {
     // ── Step 5b: Process NEW slugs (full upsert with TileInfo) ──
     for (let i = 0; i < newSlugs.length; i += DETAIL_BATCH_SIZE) {
       const batch = newSlugs.slice(i, i + DETAIL_BATCH_SIZE);
-      const detailMap = await fetchDetailBatch(batch);
+      const detailMap = await fetchDetailBatch(batch, davoToken);
 
       await Promise.allSettled(
         batch.map(async (slug) => {
