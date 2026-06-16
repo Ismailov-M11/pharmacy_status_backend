@@ -3,7 +3,7 @@ const cron = require("node-cron");
 const osonModel = require("../models/osonPharmacyModel");
 
 // ─── OSON API Config ───────────────────────────────────────────────────────
-const OSON_API_BASE = process.env.OSON_API_BASE || "https://dev-api.davodelivery.uz/api/oson";
+const OSON_API_BASE = "https://dev-api.davodelivery.uz/api/oson";
 
 const OSON_REGIONS = [
   "surxondaryo",
