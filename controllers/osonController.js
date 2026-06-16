@@ -72,6 +72,7 @@ async function getStats(req, res) {
       connected: parseInt(stats.connected) || 0,
       not_connected: parseInt(stats.not_connected) || 0,
       deleted: parseInt(stats.deleted) || 0,
+      new: parseInt(stats.new) || 0,
       lastSyncedAt: stats.last_synced_at,
     });
   } catch (error) {
@@ -143,6 +144,7 @@ async function getSyncStatus(req, res) {
         connected: parseInt(stats.connected) || 0,
         not_connected: parseInt(stats.not_connected) || 0,
         deleted: parseInt(stats.deleted) || 0,
+        new: parseInt(stats.new) || 0,
         lastSyncedAt: stats.last_synced_at,
       },
     });

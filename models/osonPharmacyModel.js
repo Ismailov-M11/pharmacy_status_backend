@@ -243,6 +243,7 @@ async function getSyncStats() {
       COUNT(*) FILTER (WHERE oson_status = 'connected') AS connected,
       COUNT(*) FILTER (WHERE oson_status = 'not_connected') AS not_connected,
       COUNT(*) FILTER (WHERE oson_status = 'deleted') AS deleted,
+      COUNT(*) FILTER (WHERE oson_status = 'new') AS new,
       MAX(last_synced_at) AS last_synced_at
     FROM oson_pharmacies
   `);
@@ -259,6 +260,7 @@ async function getFilteredStats(filters = {}) {
       COUNT(*) FILTER (WHERE oson_status = 'connected') AS connected,
       COUNT(*) FILTER (WHERE oson_status = 'not_connected') AS not_connected,
       COUNT(*) FILTER (WHERE oson_status = 'deleted') AS deleted,
+      COUNT(*) FILTER (WHERE oson_status = 'new') AS new,
       MAX(last_synced_at) AS last_synced_at
     FROM oson_pharmacies ${where}
   `, params);

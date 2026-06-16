@@ -135,7 +135,33 @@ async function fetchDavoConnectedSlugs(davoToken) {
     console.log(`[OSON Sync] Connected in Davo: ${slugSet.size}`);
     return slugSet;
   } catch (err) {
-    console.error("[OSON Sync] Failed to fetch Davo list:", err.message);
+    console.error("[OSON Sync] Failed to fetch Davo market list:", err.message);
+    return new Set();
+  }
+}
+
+async function fetchLeadSlugs(davoToken) {
+  try {
+    const response = await axios.post(
+      `${DAVO_API_BASE}/lead/list`,
+      { searchKey: "", page: 0, size: 50000 },
+      {
+        headers: {
+          authorization: `Bearer ${davoToken}`,
+          "content-type": "application/json",
+        },
+        timeout: 30000,
+      }
+    );
+
+    const list = response.data?.payload?.list || [];
+    const slugSet = new Set();
+    list.forEach((m) => { if (m.slug) slugSet.add(m.slug); });
+
+    console.log(`[OSON Sync] Leads in Davo: ${slugSet.size}`);
+    return slugSet;
+  } catch (err) {
+    console.error("[OSON Sync] Failed to fetch Davo lead list:", err.message);
     return new Set();
   }
 }
@@ -159,8 +185,11 @@ async function runOsonSync(davoToken) {
 
   try {
     progressPhase = "collecting";
-    const osonSlugs = await fetchAllOsonSlugs(davoToken);
-    const davoSlugs = await fetchDavoConnectedSlugs(davoToken);
+    const [osonSlugs, davoSlugs, leadSlugs] = await Promise.all([
+      fetchAllOsonSlugs(davoToken),
+      fetchDavoConnectedSlugs(davoToken),
+      fetchLeadSlugs(davoToken),
+    ]);
     const dbSlugsMap = await osonModel.getAllSlugsWithStatus();
 
     const stats = { inserted: 0, updated: 0, statusChanged: 0, deleted: 0, markedDeleted: 0, errors: 0 };
@@ -190,8 +219,9 @@ async function runOsonSync(davoToken) {
       await Promise.allSettled(
         batch.map(async (slug) => {
           const currentDbStatus = dbSlugsMap.get(slug);
-          const isConnected = davoSlugs.has(slug);
-          const newStatus = isConnected ? "connected" : "not_connected";
+          const newStatus = davoSlugs.has(slug) ? "connected"
+            : leadSlugs.has(slug) ? "not_connected"
+            : "new";
           const detail = detailMap.get(slug);
 
           try {
@@ -227,7 +257,9 @@ async function runOsonSync(davoToken) {
       await Promise.allSettled(
         batch.map(async (slug) => {
           const detail = detailMap.get(slug);
-          const newStatus = davoSlugs.has(slug) ? "connected" : "not_connected";
+          const newStatus = davoSlugs.has(slug) ? "connected"
+            : leadSlugs.has(slug) ? "not_connected"
+            : "new";
 
           if (detail) {
             try {
