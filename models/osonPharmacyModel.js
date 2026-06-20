@@ -47,9 +47,17 @@ function buildFilterWhere(filters) {
   return { where, params, nextIdx: idx };
 }
 
+const SELECT_COLS = `
+  id, slug, name_ru, name_uz, parent_region_ru, parent_region_uz,
+  region_ru, region_uz, address_ru, address_uz, landmark_ru, landmark_uz,
+  latitude::float, longitude::float, phone, open_time, close_time,
+  has_delivery, is_verified, discount_percent::float, cashback_percent::float,
+  oson_status, last_synced_at, oson_synced_time, created_at
+`;
+
 async function getAllOsonPharmacies(filters = {}) {
   const { where, params } = buildFilterWhere(filters);
-  const query = `SELECT * FROM oson_pharmacies ${where} ORDER BY name_ru ASC`;
+  const query = `SELECT ${SELECT_COLS} FROM oson_pharmacies ${where} ORDER BY name_ru ASC`;
   const result = await db.query(query, params);
   return result.rows;
 }
@@ -65,7 +73,7 @@ async function getOsonPharmaciesPaginated(filters = {}, page = 0, size = 100) {
 
   const dataParams = [...params, size, page * size];
   const dataResult = await db.query(
-    `SELECT * FROM oson_pharmacies ${where} ORDER BY name_ru ASC LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
+    `SELECT ${SELECT_COLS} FROM oson_pharmacies ${where} ORDER BY name_ru ASC LIMIT $${nextIdx} OFFSET $${nextIdx + 1}`,
     dataParams
   );
 
