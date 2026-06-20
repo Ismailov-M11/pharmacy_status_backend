@@ -165,6 +165,7 @@ async function upsertPharmacy(slug, data, newStatus) {
       is_verified = EXCLUDED.is_verified,
       discount_percent = EXCLUDED.discount_percent,
       cashback_percent = EXCLUDED.cashback_percent,
+      oson_status = EXCLUDED.oson_status,
       oson_synced_time = COALESCE(EXCLUDED.oson_synced_time, oson_pharmacies.oson_synced_time),
       last_synced_at = NOW()
     RETURNING *;

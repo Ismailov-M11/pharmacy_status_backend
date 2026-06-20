@@ -225,11 +225,36 @@ async function runOsonSync(davoToken) {
           const detail = detailMap.get(slug);
 
           try {
-            await osonModel.updateStatusAndSyncedTime(
-              slug,
-              newStatus,
-              detail?.SyncedTime || null
-            );
+            if (detail) {
+              await osonModel.upsertPharmacy(
+                slug,
+                {
+                  name_ru: detail.NameRu,
+                  name_uz: detail.NameUz,
+                  parent_region_ru: detail.ParentRegionNameRu,
+                  parent_region_uz: detail.ParentRegionNameUz,
+                  region_ru: detail.RegionNameRu,
+                  region_uz: detail.RegionNameUz,
+                  address_ru: detail.AddressRu,
+                  address_uz: detail.AddressUz,
+                  landmark_ru: detail.LandmarkRu,
+                  landmark_uz: detail.LandmarkUz,
+                  latitude: detail.Latitude,
+                  longitude: detail.Longitude,
+                  phone: detail.Phone,
+                  open_time: detail.OpenTime,
+                  close_time: detail.CloseTime,
+                  has_delivery: detail.HasDelivery,
+                  is_verified: detail.IsVerified,
+                  discount_percent: detail.DiscountPercent,
+                  cashback_percent: detail.CashbackPercent,
+                  oson_synced_time: detail.SyncedTime || null,
+                },
+                newStatus
+              );
+            } else {
+              await osonModel.updateStatusAndSyncedTime(slug, newStatus, null);
+            }
             if (currentDbStatus !== newStatus) {
               stats.statusChanged++;
             } else {
