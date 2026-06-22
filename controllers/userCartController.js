@@ -140,6 +140,30 @@ async function addComment(req, res) {
   }
 }
 
+// GET /api/user-carts/statuses
+async function getStatuses(req, res) {
+  try {
+    const statuses = await cartModel.getStatuses();
+    res.json(statuses);
+  } catch (err) {
+    console.error("[UserCartController] getStatuses error:", err);
+    res.status(500).json({ error: "Failed to load statuses" });
+  }
+}
+
+// POST /api/user-carts/statuses
+async function createStatus(req, res) {
+  try {
+    const { label, createdBy } = req.body;
+    if (!label || !label.trim()) return res.status(400).json({ error: "Label required" });
+    const status = await cartModel.createStatus(label, createdBy);
+    res.json(status);
+  } catch (err) {
+    console.error("[UserCartController] createStatus error:", err);
+    res.status(500).json({ error: "Failed to create status" });
+  }
+}
+
 // GET /api/user-carts/filter-options
 async function getFilterOptions(req, res) {
   try {
@@ -155,4 +179,4 @@ async function getFilterOptions(req, res) {
   }
 }
 
-module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getComments, addComment, getFilterOptions };
+module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getComments, addComment, getFilterOptions, getStatuses, createStatus };

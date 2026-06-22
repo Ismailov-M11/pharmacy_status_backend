@@ -227,6 +227,26 @@ async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_cart_comments_cart ON user_cart_comments(cart_id, created_at);
     `);
 
+    // Create cart_statuses table for dynamic status management
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cart_statuses (
+        id         SERIAL PRIMARY KEY,
+        value      VARCHAR(50) UNIQUE NOT NULL,
+        label      TEXT NOT NULL,
+        color      VARCHAR(20) NOT NULL DEFAULT 'gray',
+        created_by VARCHAR(100),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // Seed default statuses
+    await pool.query(`
+      INSERT INTO cart_statuses (value, label, color) VALUES
+        ('unprocessed', 'Не обработан', 'yellow'),
+        ('processed',   'Обработан',    'green'),
+        ('missed_call', 'Недозвон',     'orange')
+      ON CONFLICT (value) DO NOTHING;
+    `);
+
     // Create oson_pharmacies table for OSON Slug List module
     await pool.query(`
       CREATE TABLE IF NOT EXISTS oson_pharmacies (

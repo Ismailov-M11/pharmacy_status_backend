@@ -273,6 +273,25 @@ async function getDistinctCommentUsers() {
   return r.rows.map((x) => x.comment_by);
 }
 
+const STATUS_COLORS = ["blue","purple","red","pink","cyan","teal","indigo","violet","rose","sky","lime","amber","slate","emerald","fuchsia"];
+
+async function getStatuses() {
+  const r = await db.query("SELECT * FROM cart_statuses ORDER BY created_at ASC");
+  return r.rows;
+}
+
+async function createStatus(label, createdBy) {
+  const color = STATUS_COLORS[Math.floor(Math.random() * STATUS_COLORS.length)];
+  const value = "custom_" + Date.now();
+  const r = await db.query(
+    `INSERT INTO cart_statuses (value, label, color, created_by)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+    [value, label.trim(), color, createdBy]
+  );
+  return r.rows[0];
+}
+
 module.exports = {
   getCartsPaginated,
   getAllCarts,
@@ -284,4 +303,6 @@ module.exports = {
   getDistinctPharmacies,
   getDistinctSources,
   getDistinctCommentUsers,
+  getStatuses,
+  createStatus,
 };
