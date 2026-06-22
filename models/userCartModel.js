@@ -337,7 +337,10 @@ async function getCartsForOrderSync() {
     FROM user_carts
     WHERE invoice_id IS NOT NULL
       AND customer_phone IS NOT NULL
-      AND order_status IN ('pending', 'in_progress')
+      AND (
+        order_status IN ('pending', 'in_progress')
+        OR (order_status IN ('delivered', 'cancelled') AND order_code IS NULL)
+      )
   `);
   return r.rows;
 }
@@ -355,7 +358,11 @@ async function bulkUpdateOrderStatus(updates) {
      FROM (
        SELECT unnest($1::int[]) AS id, unnest($2::varchar[]) AS status, unnest($3::varchar[]) AS code
      ) u
-     WHERE user_carts.id = u.id`,
+     WHERE user_carts.id = u.id
+       AND (
+         user_carts.order_status NOT IN ('delivered', 'cancelled', 'deleted')
+         OR u.code IS NOT NULL
+       )`,
     [ids, statuses, codes]
   );
 }
