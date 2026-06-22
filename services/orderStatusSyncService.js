@@ -77,34 +77,35 @@ async function runOrderSync(token) {
         continue;
       }
 
-      // Build a map of invoice_id → order status from API response
-      const apiInvoiceStatus = new Map(); // invoice_id → 'COMPLETED' | 'CANCELLED' | 'ACTIVE'
+      // Build a map of invoice_id → { status, code } from API response
+      // order.code = "ORD0395", order.invoice.id = 6487 — we match by invoice.id
+      const apiInvoiceMap = new Map(); // invoice_id → { status: string, code: string }
       for (const order of orders) {
         const invoiceId = order.invoice?.id;
         if (!invoiceId) continue;
-        apiInvoiceStatus.set(invoiceId, order.status);
+        apiInvoiceMap.set(invoiceId, { status: order.status, code: order.code ?? null });
       }
 
       // For each cart belonging to this phone, determine new order_status
       for (const [invoiceId, cartId] of invoiceToCartId) {
-        const apiStatus = apiInvoiceStatus.get(invoiceId);
+        const apiData = apiInvoiceMap.get(invoiceId);
 
-        if (apiStatus === undefined) {
+        if (!apiData) {
           // invoice_id not found in this customer's orders → leave as pending (no update)
           continue;
         }
 
         let newOrderStatus;
-        if (apiStatus === "COMPLETED") {
+        if (apiData.status === "COMPLETED") {
           newOrderStatus = "delivered";
-        } else if (apiStatus === "CANCELLED") {
+        } else if (apiData.status === "CANCELLED") {
           newOrderStatus = "cancelled";
         } else {
           // NEW, CONFIRMED, READY, WAITING_FOR_COURIER, PICKED_UP, etc. → Доставляется
           newOrderStatus = "in_progress";
         }
 
-        updates.push({ id: cartId, orderStatus: newOrderStatus, orderCode: order.code ?? null });
+        updates.push({ id: cartId, orderStatus: newOrderStatus, orderCode: apiData.code });
       }
       syncProgress = { current: ++donePhones, total: phoneMap.size };
     }
