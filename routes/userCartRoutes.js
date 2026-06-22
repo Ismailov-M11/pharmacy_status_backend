@@ -7,6 +7,8 @@ router.get("/stats", ctrl.getStats);
 router.get("/sync-status", ctrl.getSyncStatus);
 router.post("/sync", ctrl.triggerSync);
 router.put("/:id/comment", ctrl.updateComment);
+router.get("/:id/comments", ctrl.getComments);
+router.post("/:id/comments", ctrl.addComment);
 router.get("/filter-options", ctrl.getFilterOptions);
 
 module.exports = router;

@@ -206,6 +206,40 @@ async function updateComment(id, comment, commentBy) {
   return result.rows[0] || null;
 }
 
+// ─── Comment history ───────────────────────────────────────────────────────────
+async function getComments(cartId) {
+  const r = await db.query(
+    `SELECT id, cart_id, text, created_by, created_at
+     FROM user_cart_comments
+     WHERE cart_id = $1
+     ORDER BY created_at ASC`,
+    [cartId]
+  );
+  return r.rows;
+}
+
+async function addComment(cartId, text, createdBy) {
+  if (!text || !text.trim()) throw new Error("Comment text required");
+
+  // Insert into history
+  const inserted = await db.query(
+    `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at)
+     VALUES ($1, $2, $3, NOW())
+     RETURNING id, cart_id, text, created_by, created_at`,
+    [cartId, text.trim(), createdBy]
+  );
+
+  // Update cart: latest comment preview + status = processed
+  await db.query(
+    `UPDATE user_carts
+     SET comment = $1, comment_by = $2, comment_at = NOW(), cart_status = 'processed'
+     WHERE id = $3`,
+    [text.trim(), createdBy, cartId]
+  );
+
+  return inserted.rows[0];
+}
+
 async function getSyncStats() {
   const result = await db.query(`
     SELECT
@@ -237,6 +271,8 @@ module.exports = {
   getAllCarts,
   upsertCart,
   updateComment,
+  getComments,
+  addComment,
   getSyncStats,
   getDistinctPharmacies,
   getDistinctSources,

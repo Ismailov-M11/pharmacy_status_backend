@@ -215,6 +215,18 @@ async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_user_carts_market ON user_carts(market_name);
     `);
 
+    // Create user_cart_comments table for comment history
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_cart_comments (
+        id         SERIAL PRIMARY KEY,
+        cart_id    INTEGER NOT NULL,
+        text       TEXT NOT NULL,
+        created_by VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_cart_comments_cart ON user_cart_comments(cart_id, created_at);
+    `);
+
     // Create oson_pharmacies table for OSON Slug List module
     await pool.query(`
       CREATE TABLE IF NOT EXISTS oson_pharmacies (

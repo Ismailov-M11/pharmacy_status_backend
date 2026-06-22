@@ -114,6 +114,32 @@ async function updateComment(req, res) {
   }
 }
 
+// GET /api/user-carts/:id/comments
+async function getComments(req, res) {
+  try {
+    const { id } = req.params;
+    const comments = await cartModel.getComments(parseInt(id));
+    res.json(comments);
+  } catch (err) {
+    console.error("[UserCartController] getComments error:", err);
+    res.status(500).json({ error: "Failed to load comments" });
+  }
+}
+
+// POST /api/user-carts/:id/comments
+async function addComment(req, res) {
+  try {
+    const { id } = req.params;
+    const { text, createdBy } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({ error: "Comment text required" });
+    const comment = await cartModel.addComment(parseInt(id), text, createdBy);
+    res.json(comment);
+  } catch (err) {
+    console.error("[UserCartController] addComment error:", err);
+    res.status(500).json({ error: "Failed to add comment" });
+  }
+}
+
 // GET /api/user-carts/filter-options
 async function getFilterOptions(req, res) {
   try {
@@ -128,4 +154,4 @@ async function getFilterOptions(req, res) {
   }
 }
 
-module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getFilterOptions };
+module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getComments, addComment, getFilterOptions };
