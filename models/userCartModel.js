@@ -218,10 +218,11 @@ async function getComments(cartId) {
   return r.rows;
 }
 
-async function addComment(cartId, text, createdBy) {
+async function addComment(cartId, text, createdBy, status) {
   if (!text || !text.trim()) throw new Error("Comment text required");
+  const validStatuses = ["unprocessed", "processed", "missed_call"];
+  const cartStatus = validStatuses.includes(status) ? status : "processed";
 
-  // Insert into history
   const inserted = await db.query(
     `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at)
      VALUES ($1, $2, $3, NOW())
@@ -229,12 +230,11 @@ async function addComment(cartId, text, createdBy) {
     [cartId, text.trim(), createdBy]
   );
 
-  // Update cart: latest comment preview + status = processed
   await db.query(
     `UPDATE user_carts
-     SET comment = $1, comment_by = $2, comment_at = NOW(), cart_status = 'processed'
-     WHERE id = $3`,
-    [text.trim(), createdBy, cartId]
+     SET comment = $1, comment_by = $2, comment_at = NOW(), cart_status = $3
+     WHERE id = $4`,
+    [text.trim(), createdBy, cartStatus, cartId]
   );
 
   return inserted.rows[0];
@@ -266,6 +266,13 @@ async function getDistinctSources() {
   return r.rows.map((x) => x.source);
 }
 
+async function getDistinctCommentUsers() {
+  const r = await db.query(
+    "SELECT DISTINCT comment_by FROM user_carts WHERE comment_by IS NOT NULL ORDER BY comment_by"
+  );
+  return r.rows.map((x) => x.comment_by);
+}
+
 module.exports = {
   getCartsPaginated,
   getAllCarts,
@@ -276,4 +283,5 @@ module.exports = {
   getSyncStats,
   getDistinctPharmacies,
   getDistinctSources,
+  getDistinctCommentUsers,
 };

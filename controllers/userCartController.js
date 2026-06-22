@@ -130,9 +130,9 @@ async function getComments(req, res) {
 async function addComment(req, res) {
   try {
     const { id } = req.params;
-    const { text, createdBy } = req.body;
+    const { text, createdBy, status } = req.body;
     if (!text || !text.trim()) return res.status(400).json({ error: "Comment text required" });
-    const comment = await cartModel.addComment(parseInt(id), text, createdBy);
+    const comment = await cartModel.addComment(parseInt(id), text, createdBy, status);
     res.json(comment);
   } catch (err) {
     console.error("[UserCartController] addComment error:", err);
@@ -143,11 +143,12 @@ async function addComment(req, res) {
 // GET /api/user-carts/filter-options
 async function getFilterOptions(req, res) {
   try {
-    const [pharmacies, sources] = await Promise.all([
+    const [pharmacies, sources, commentUsers] = await Promise.all([
       cartModel.getDistinctPharmacies(),
       cartModel.getDistinctSources(),
+      cartModel.getDistinctCommentUsers(),
     ]);
-    res.json({ pharmacies, sources });
+    res.json({ pharmacies, sources, commentUsers });
   } catch (err) {
     console.error("[UserCartController] getFilterOptions error:", err);
     res.status(500).json({ error: "Failed to load filter options" });
