@@ -9,6 +9,7 @@ let lastSyncAt = null;
 let lastSyncError = null;
 let lastSyncResult = { delivered: 0, cancelled: 0, inProgress: 0, checked: 0 };
 let savedDavoToken = null;
+let syncProgress = { current: 0, total: 0 };
 
 async function fetchOrdersByPhone(token, phone) {
   const size = 100;
@@ -62,7 +63,9 @@ async function runOrderSync(token) {
       phoneMap.get(cart.customer_phone).set(cart.invoice_id, cart.id);
     }
 
+    syncProgress = { current: 0, total: phoneMap.size };
     const updates = [];
+    let donePhones = 0;
 
     for (const [phone, invoiceToCartId] of phoneMap) {
       let orders;
@@ -70,6 +73,7 @@ async function runOrderSync(token) {
         orders = await fetchOrdersByPhone(useToken, phone);
       } catch (err) {
         console.warn(`[OrderStatusSync] Failed to fetch orders for phone ${phone}:`, err.message);
+        syncProgress = { current: ++donePhones, total: phoneMap.size };
         continue;
       }
 
@@ -102,6 +106,7 @@ async function runOrderSync(token) {
 
         updates.push({ id: cartId, orderStatus: newOrderStatus, orderCode: order.code ?? null });
       }
+      syncProgress = { current: ++donePhones, total: phoneMap.size };
     }
 
     if (updates.length) {
@@ -148,7 +153,7 @@ function startOrderStatusCron() {
 }
 
 function getOrderSyncState() {
-  return { isSyncing, lastSyncAt, lastSyncError, lastSyncResult, hasToken: !!savedDavoToken };
+  return { isSyncing, lastSyncAt, lastSyncError, lastSyncResult, hasToken: !!savedDavoToken, syncProgress };
 }
 
 module.exports = { startOrderStatusCron, runOrderSync, getOrderSyncState };

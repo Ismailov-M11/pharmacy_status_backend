@@ -265,9 +265,15 @@ async function initializeDatabase() {
     await pool.query(`
       INSERT INTO cart_statuses (value, label, color) VALUES
         ('unprocessed', 'Не обработан', 'yellow'),
-        ('processed',   'Обработан',    'green'),
+        ('processed',   'Обработан',    'blue'),
         ('missed_call', 'Недозвон',     'orange')
       ON CONFLICT (value) DO NOTHING;
+    `);
+    // Ensure correct colors for default statuses (fix existing rows)
+    await pool.query(`
+      UPDATE cart_statuses SET color = 'blue'   WHERE value = 'processed'   AND color <> 'blue';
+      UPDATE cart_statuses SET color = 'yellow' WHERE value = 'unprocessed' AND color <> 'yellow';
+      UPDATE cart_statuses SET color = 'orange' WHERE value = 'missed_call' AND color <> 'orange';
     `);
 
     // Create oson_pharmacies table for OSON Slug List module

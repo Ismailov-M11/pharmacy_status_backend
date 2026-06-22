@@ -246,25 +246,35 @@ async function getComments(cartId) {
 }
 
 async function addComment(cartId, text, createdBy, status) {
-  if (!text || !text.trim()) throw new Error("Comment text required");
+  // text is optional — status change alone is allowed
+  if (!status) throw new Error("Status required");
 
   // Validate status against cart_statuses table; fallback to 'processed'
   const statusCheck = await db.query("SELECT value FROM cart_statuses WHERE value = $1", [status]);
   const cartStatus = statusCheck.rows.length > 0 ? status : "processed";
 
+  const trimmedText = text && text.trim() ? text.trim() : null;
+
   const inserted = await db.query(
     `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
      VALUES ($1, $2, $3, NOW(), $4)
      RETURNING id, cart_id, text, created_by, created_at, status`,
-    [cartId, text.trim(), createdBy, cartStatus]
+    [cartId, trimmedText, createdBy, cartStatus]
   );
 
-  await db.query(
-    `UPDATE user_carts
-     SET comment = $1, comment_by = $2, comment_at = NOW(), cart_status = $3
-     WHERE id = $4`,
-    [text.trim(), createdBy, cartStatus, cartId]
-  );
+  if (trimmedText) {
+    // Update cart comment + status when text is provided
+    await db.query(
+      `UPDATE user_carts SET comment = $1, comment_by = $2, comment_at = NOW(), cart_status = $3 WHERE id = $4`,
+      [trimmedText, createdBy, cartStatus, cartId]
+    );
+  } else {
+    // Status-only change — don't overwrite existing comment text
+    await db.query(
+      `UPDATE user_carts SET cart_status = $1 WHERE id = $2`,
+      [cartStatus, cartId]
+    );
+  }
 
   return inserted.rows[0];
 }
