@@ -94,7 +94,7 @@ const SELECT_COLS = `
   invoice_service_total::float, invoice_total::float, invoice_paid, invoice_promo_code,
   source, latitude::float, longitude::float,
   cart_status, comment, comment_by, comment_at,
-  last_synced_at
+  last_synced_at, order_status, order_status_synced_at
 `;
 
 async function getCartsPaginated(filters = {}, page = 0, size = 50) {
@@ -126,6 +126,12 @@ async function getAllCarts(filters = {}) {
 }
 
 async function upsertCart(cart) {
+  const c = cart;
+  const isDeleted = c.deleted === true || c.isDeleted === true;
+  const invoiceId = c.invoice?.id ?? null;
+  // Compute initial order_status for new inserts
+  const initialOrderStatus = isDeleted ? 'deleted' : (invoiceId ? 'in_progress' : 'pending');
+
   const query = `
     INSERT INTO user_carts (
       id, creation_date, modified_date, created_by,
@@ -136,11 +142,11 @@ async function upsertCart(cart) {
       invoice_id, invoice_market_total, invoice_delivery_total,
       invoice_service_total, invoice_total, invoice_paid, invoice_promo_code,
       source, latitude, longitude,
-      last_synced_at
+      order_status, last_synced_at
     ) VALUES (
       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,
       $14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,
-      $25,$26,$27, NOW()
+      $25,$26,$27,$28, NOW()
     )
     ON CONFLICT (id) DO UPDATE SET
       creation_date         = EXCLUDED.creation_date,
@@ -169,10 +175,15 @@ async function upsertCart(cart) {
       source                = EXCLUDED.source,
       latitude              = EXCLUDED.latitude,
       longitude             = EXCLUDED.longitude,
+      order_status          = CASE
+        WHEN $28 = 'deleted' THEN 'deleted'
+        WHEN user_carts.order_status IN ('delivered', 'cancelled', 'deleted') THEN user_carts.order_status
+        WHEN EXCLUDED.invoice_id IS NOT NULL AND user_carts.order_status = 'pending' THEN 'in_progress'
+        ELSE user_carts.order_status
+      END,
       last_synced_at        = NOW()
   `;
 
-  const c = cart;
   await db.query(query, [
     c.id,
     c.creationDate,
@@ -191,7 +202,7 @@ async function upsertCart(cart) {
     c.market?.longitude ?? null,
     c.market?.slug ?? null,
     JSON.stringify(c.items ?? []),
-    c.invoice?.id ?? null,
+    invoiceId,
     c.invoice?.marketTotal ?? 0,
     c.invoice?.deliveryTotal ?? 0,
     c.invoice?.serviceTotal ?? 0,
@@ -201,6 +212,7 @@ async function upsertCart(cart) {
     c.source ?? null,
     c.latitude ?? null,
     c.longitude ?? null,
+    initialOrderStatus,
   ]);
 }
 
@@ -310,6 +322,31 @@ async function createStatus(label, createdBy) {
   return r.rows[0];
 }
 
+async function getCartsForOrderSync() {
+  const r = await db.query(`
+    SELECT id, invoice_id, creation_date
+    FROM user_carts
+    WHERE invoice_id IS NOT NULL
+      AND order_status IN ('pending', 'in_progress')
+    ORDER BY creation_date ASC
+  `);
+  return r.rows;
+}
+
+async function bulkUpdateOrderStatus(updates) {
+  if (!updates.length) return;
+  const ids = updates.map((u) => u.id);
+  const statuses = updates.map((u) => u.orderStatus);
+  await db.query(
+    `UPDATE user_carts
+     SET order_status = u.status,
+         order_status_synced_at = NOW()
+     FROM (SELECT unnest($1::int[]) AS id, unnest($2::varchar[]) AS status) u
+     WHERE user_carts.id = u.id`,
+    [ids, statuses]
+  );
+}
+
 module.exports = {
   getCartsPaginated,
   getAllCarts,
@@ -323,4 +360,6 @@ module.exports = {
   getDistinctCommentUsers,
   getStatuses,
   createStatus,
+  getCartsForOrderSync,
+  bulkUpdateOrderStatus,
 };

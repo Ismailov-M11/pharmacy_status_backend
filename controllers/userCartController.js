@@ -1,5 +1,6 @@
 const cartModel = require("../models/userCartModel");
 const syncService = require("../services/userCartSyncService");
+const orderSyncService = require("../services/orderStatusSyncService");
 
 // GET /api/user-carts/data
 async function getData(req, res) {
@@ -182,4 +183,31 @@ async function getFilterOptions(req, res) {
   }
 }
 
-module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getComments, addComment, getFilterOptions, getStatuses, createStatus };
+// GET /api/user-carts/order-sync-status
+async function getOrderSyncStatus(req, res) {
+  try {
+    res.json(orderSyncService.getOrderSyncState());
+  } catch (err) {
+    console.error("[UserCartController] getOrderSyncStatus error:", err);
+    res.status(500).json({ error: "Failed to get order sync status" });
+  }
+}
+
+// POST /api/user-carts/order-sync
+async function triggerOrderSync(req, res) {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) return res.status(401).json({ error: "Authorization token required" });
+
+    const state = orderSyncService.getOrderSyncState();
+    if (state.isSyncing) return res.status(409).json({ error: "Order sync already in progress" });
+
+    const result = await orderSyncService.runOrderSync(token);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error("[UserCartController] triggerOrderSync error:", err);
+    res.status(500).json({ error: err.message || "Failed to run order sync" });
+  }
+}
+
+module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getComments, addComment, getFilterOptions, getStatuses, createStatus, getOrderSyncStatus, triggerOrderSync };

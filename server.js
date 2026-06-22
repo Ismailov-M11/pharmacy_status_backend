@@ -232,6 +232,15 @@ async function initializeDatabase() {
       ALTER TABLE user_cart_comments ADD COLUMN IF NOT EXISTS status VARCHAR(50);
     `);
 
+    // Add order_status and order_status_synced_at to user_carts
+    await pool.query(`
+      ALTER TABLE user_carts ADD COLUMN IF NOT EXISTS order_status VARCHAR(20) DEFAULT 'pending';
+      ALTER TABLE user_carts ADD COLUMN IF NOT EXISTS order_status_synced_at TIMESTAMP NULL;
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_carts_order_status ON user_carts(order_status);
+    `);
+
     // Create cart_statuses table for dynamic status management
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cart_statuses (
@@ -382,6 +391,10 @@ initializeDatabase().then(() => {
   // Start User Carts cron sync (daily at 12:00 Tashkent time)
   const userCartSyncService = require('./services/userCartSyncService');
   userCartSyncService.startUserCartCron();
+
+  // Start Order Status cron sync (daily at 12:00 Tashkent time)
+  const orderStatusSyncService = require('./services/orderStatusSyncService');
+  orderStatusSyncService.startOrderStatusCron();
 
   app.listen(PORT, () => {
     console.log(`Backend running on port ${PORT} `);
