@@ -1,0 +1,12 @@
+const express = require("express");
+const router = express.Router();
+const ctrl = require("../controllers/userCartController");
+
+router.get("/data", ctrl.getData);
+router.get("/stats", ctrl.getStats);
+router.get("/sync-status", ctrl.getSyncStatus);
+router.post("/sync", ctrl.triggerSync);
+router.put("/:id/comment", ctrl.updateComment);
+router.get("/filter-options", ctrl.getFilterOptions);
+
+module.exports = router;

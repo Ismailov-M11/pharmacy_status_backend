@@ -5,6 +5,7 @@ const statusRoutes = require("./routes/statusRoutes");
 const osonRoutes = require("./routes/osonRoutes");
 const contractRoutes = require("./routes/contractRoutes");
 const batchRoutes = require("./routes/batchRoutes");
+const userCartRoutes = require("./routes/userCartRoutes");
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use("/api/status", statusRoutes);
 app.use("/api/oson", osonRoutes);
 app.use("/api/contracts", contractRoutes);
 app.use("/api/batch", batchRoutes);
+app.use("/api/user-carts", userCartRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -172,6 +174,47 @@ async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_user_settings ON user_column_settings(user_id, page);
     `);
 
+    // Create user_carts table for User Carts module
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_carts (
+        id                      INTEGER PRIMARY KEY,
+        creation_date           TIMESTAMP,
+        modified_date           TIMESTAMP,
+        created_by              VARCHAR(50),
+        customer_id             INTEGER,
+        customer_first_name     VARCHAR(100),
+        customer_last_name      VARCHAR(100),
+        customer_phone          VARCHAR(20),
+        market_id               INTEGER,
+        market_name             TEXT,
+        market_address          TEXT,
+        market_landmark         TEXT,
+        market_phone            VARCHAR(20),
+        market_latitude         DECIMAL(10,7),
+        market_longitude        DECIMAL(10,7),
+        market_slug             VARCHAR(200),
+        items                   JSONB NOT NULL DEFAULT '[]',
+        invoice_id              INTEGER,
+        invoice_market_total    DECIMAL(15,2),
+        invoice_delivery_total  DECIMAL(15,2),
+        invoice_service_total   DECIMAL(15,2),
+        invoice_total           DECIMAL(15,2),
+        invoice_paid            BOOLEAN DEFAULT FALSE,
+        invoice_promo_code      VARCHAR(100),
+        source                  VARCHAR(50),
+        latitude                DECIMAL(10,7),
+        longitude               DECIMAL(10,7),
+        cart_status             VARCHAR(20) DEFAULT 'unprocessed',
+        comment                 TEXT,
+        comment_by              VARCHAR(100),
+        comment_at              TIMESTAMP,
+        last_synced_at          TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_carts_creation ON user_carts(creation_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_user_carts_status ON user_carts(cart_status);
+      CREATE INDEX IF NOT EXISTS idx_user_carts_market ON user_carts(market_name);
+    `);
+
     // Create oson_pharmacies table for OSON Slug List module
     await pool.query(`
       CREATE TABLE IF NOT EXISTS oson_pharmacies (
@@ -298,6 +341,10 @@ initializeDatabase().then(() => {
   // Start Didox contract status polling (every 5 minutes)
   const didoxPolling = require('./services/didoxPollingService');
   didoxPolling.startDidoxCron();
+
+  // Start User Carts cron sync (daily at 12:00 Tashkent time)
+  const userCartSyncService = require('./services/userCartSyncService');
+  userCartSyncService.startUserCartCron();
 
   app.listen(PORT, () => {
     console.log(`Backend running on port ${PORT} `);
