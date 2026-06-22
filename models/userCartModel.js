@@ -129,8 +129,8 @@ async function upsertCart(cart) {
   const c = cart;
   const isDeleted = c.deleted === true || c.isDeleted === true;
   const invoiceId = c.invoice?.id ?? null;
-  // Compute initial order_status for new inserts
-  const initialOrderStatus = isDeleted ? 'deleted' : (invoiceId ? 'in_progress' : 'pending');
+  // New carts start as pending; order sync sets in_progress/delivered/cancelled
+  const initialOrderStatus = isDeleted ? 'deleted' : 'pending';
 
   const query = `
     INSERT INTO user_carts (
@@ -178,7 +178,6 @@ async function upsertCart(cart) {
       order_status          = CASE
         WHEN $28 = 'deleted' THEN 'deleted'
         WHEN user_carts.order_status IN ('delivered', 'cancelled', 'deleted') THEN user_carts.order_status
-        WHEN EXCLUDED.invoice_id IS NOT NULL AND user_carts.order_status = 'pending' THEN 'in_progress'
         ELSE user_carts.order_status
       END,
       last_synced_at        = NOW()

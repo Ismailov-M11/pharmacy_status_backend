@@ -240,10 +240,10 @@ async function initializeDatabase() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_user_carts_order_status ON user_carts(order_status);
     `);
-    // Fix existing rows: carts with invoice_id should be in_progress, not pending
+    // Reset any incorrectly-set in_progress back to pending — order sync will re-determine
     await pool.query(`
-      UPDATE user_carts SET order_status = 'in_progress'
-      WHERE invoice_id IS NOT NULL AND order_status = 'pending';
+      UPDATE user_carts SET order_status = 'pending'
+      WHERE order_status = 'in_progress';
     `);
 
     // Create cart_statuses table for dynamic status management

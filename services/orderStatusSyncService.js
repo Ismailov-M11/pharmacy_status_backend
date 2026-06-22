@@ -105,6 +105,13 @@ async function runOrderSync(token) {
       }
     }
 
+    // Remaining in invoiceMap = active orders (not completed/cancelled) → in_progress
+    for (const [, cartIds] of invoiceMap) {
+      for (const cartId of cartIds) {
+        updates.push({ id: cartId, orderStatus: "in_progress" });
+      }
+    }
+
     if (updates.length) {
       await cartModel.bulkUpdateOrderStatus(updates);
     }
@@ -113,6 +120,7 @@ async function runOrderSync(token) {
     lastSyncResult = {
       delivered: updates.filter((u) => u.orderStatus === "delivered").length,
       cancelled: updates.filter((u) => u.orderStatus === "cancelled").length,
+      inProgress: updates.filter((u) => u.orderStatus === "in_progress").length,
       checked: activeCarts.length,
     };
 
