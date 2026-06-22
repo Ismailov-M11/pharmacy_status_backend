@@ -231,6 +231,10 @@ async function initializeDatabase() {
     await pool.query(`
       ALTER TABLE user_cart_comments ADD COLUMN IF NOT EXISTS status VARCHAR(50);
     `);
+    // Allow null text — status-only entries (no comment) must be supported
+    await pool.query(`
+      ALTER TABLE user_cart_comments ALTER COLUMN text DROP NOT NULL;
+    `);
 
     // Add order_status and order_status_synced_at to user_carts
     await pool.query(`

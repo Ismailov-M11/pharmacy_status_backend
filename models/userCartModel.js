@@ -236,7 +236,7 @@ async function updateComment(id, comment, commentBy) {
 // ─── Comment history ───────────────────────────────────────────────────────────
 async function getComments(cartId) {
   const r = await db.query(
-    `SELECT id, cart_id, text, created_by, created_at, status
+    `SELECT id, cart_id, NULLIF(text, '') AS text, created_by, created_at, status
      FROM user_cart_comments
      WHERE cart_id = $1
      ORDER BY created_at ASC`,
@@ -257,8 +257,8 @@ async function addComment(cartId, text, createdBy, status) {
 
   const inserted = await db.query(
     `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
-     VALUES ($1, $2, $3, NOW(), $4)
-     RETURNING id, cart_id, text, created_by, created_at, status`,
+     VALUES ($1, COALESCE($2, ''), $3, NOW(), $4)
+     RETURNING id, cart_id, NULLIF(text, '') AS text, created_by, created_at, status`,
     [cartId, trimmedText, createdBy, cartStatus]
   );
 
@@ -345,7 +345,7 @@ async function markMissingCartsDeleted(syncStartAt) {
     const histStatuses = ids.map(() => "__order__deleted");
     await db.query(
       `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
-       SELECT unnest($1::int[]), NULL, 'system', NOW(), unnest($2::varchar[])`,
+       SELECT unnest($1::int[]), '', 'system', NOW(), unnest($2::varchar[])`,
       [ids, histStatuses]
     );
   }
@@ -396,7 +396,7 @@ async function bulkUpdateOrderStatus(updates) {
     const histStatuses = updated.rows.map((r) => `__order__${r.new_status}`);
     await db.query(
       `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
-       SELECT unnest($1::int[]), NULL, 'system', NOW(), unnest($2::varchar[])`,
+       SELECT unnest($1::int[]), '', 'system', NOW(), unnest($2::varchar[])`,
       [histIds, histStatuses]
     );
   }
