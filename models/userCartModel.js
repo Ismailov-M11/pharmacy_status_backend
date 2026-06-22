@@ -94,7 +94,7 @@ const SELECT_COLS = `
   invoice_service_total::float, invoice_total::float, invoice_paid, invoice_promo_code,
   source, latitude::float, longitude::float,
   cart_status, comment, comment_by, comment_at,
-  last_synced_at, order_status, order_status_synced_at
+  last_synced_at, order_status, order_status_synced_at, order_code
 `;
 
 async function getCartsPaginated(filters = {}, page = 0, size = 50) {
@@ -336,13 +336,17 @@ async function bulkUpdateOrderStatus(updates) {
   if (!updates.length) return;
   const ids = updates.map((u) => u.id);
   const statuses = updates.map((u) => u.orderStatus);
+  const codes = updates.map((u) => u.orderCode ?? null);
   await db.query(
     `UPDATE user_carts
      SET order_status = u.status,
+         order_code = CASE WHEN u.code IS NOT NULL THEN u.code ELSE user_carts.order_code END,
          order_status_synced_at = NOW()
-     FROM (SELECT unnest($1::int[]) AS id, unnest($2::varchar[]) AS status) u
+     FROM (
+       SELECT unnest($1::int[]) AS id, unnest($2::varchar[]) AS status, unnest($3::varchar[]) AS code
+     ) u
      WHERE user_carts.id = u.id`,
-    [ids, statuses]
+    [ids, statuses, codes]
   );
 }
 

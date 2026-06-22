@@ -245,6 +245,10 @@ async function initializeDatabase() {
       UPDATE user_carts SET order_status = 'pending'
       WHERE order_status = 'in_progress';
     `);
+    // Store the human-readable order code (e.g. ORD0395) when found via order sync
+    await pool.query(`
+      ALTER TABLE user_carts ADD COLUMN IF NOT EXISTS order_code VARCHAR(20) NULL;
+    `);
 
     // Create cart_statuses table for dynamic status management
     await pool.query(`

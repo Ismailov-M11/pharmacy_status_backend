@@ -100,7 +100,7 @@ async function runOrderSync(token) {
           newOrderStatus = "in_progress";
         }
 
-        updates.push({ id: cartId, orderStatus: newOrderStatus });
+        updates.push({ id: cartId, orderStatus: newOrderStatus, orderCode: order.code ?? null });
       }
     }
 
