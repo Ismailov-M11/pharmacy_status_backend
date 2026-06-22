@@ -10,10 +10,10 @@ let lastSyncError = null;
 let lastSyncResult = { delivered: 0, cancelled: 0, checked: 0 };
 let savedDavoToken = null;
 
-async function fetchOrderPage(token, status, fromDate, page, size) {
+async function fetchOrderPage(token, status, page, size) {
   const response = await axios.post(
     ORDER_LIST_URL,
-    { status, fromDate, page, size },
+    { status, page, size },
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -27,14 +27,14 @@ async function fetchOrderPage(token, status, fromDate, page, size) {
   return payload; // { list, total }
 }
 
-async function fetchAllOrdersByStatus(token, status, fromDate) {
+async function fetchAllOrdersByStatus(token, status) {
   const size = 100;
-  const first = await fetchOrderPage(token, status, fromDate, 0, size);
+  const first = await fetchOrderPage(token, status, 0, size);
   const total = first.total || 0;
   const all = [...(first.list || [])];
   const totalPages = Math.ceil(total / size);
   for (let page = 1; page < totalPages; page++) {
-    const data = await fetchOrderPage(token, status, fromDate, page, size);
+    const data = await fetchOrderPage(token, status, page, size);
     all.push(...(data.list || []));
   }
   return all;
@@ -64,16 +64,13 @@ async function runOrderSync(token) {
       return lastSyncResult;
     }
 
-    // Build invoice_id → [cart_ids] map and find earliest date
+    // Build invoice_id → [cart_ids] map
     const invoiceMap = new Map();
-    let minDate = null;
 
     for (const cart of activeCarts) {
       if (!cart.invoice_id) continue;
       if (!invoiceMap.has(cart.invoice_id)) invoiceMap.set(cart.invoice_id, []);
       invoiceMap.get(cart.invoice_id).push(cart.id);
-      const d = new Date(cart.creation_date);
-      if (!minDate || d < minDate) minDate = d;
     }
 
     if (!invoiceMap.size) {
@@ -82,11 +79,10 @@ async function runOrderSync(token) {
       return lastSyncResult;
     }
 
-    const fromDate = minDate ? minDate.toISOString().split("T")[0] : null;
     const updates = [];
 
     // Fetch COMPLETED orders → mark as delivered
-    const completed = await fetchAllOrdersByStatus(useToken, "COMPLETED", fromDate);
+    const completed = await fetchAllOrdersByStatus(useToken, "COMPLETED");
     for (const order of completed) {
       const invoiceId = extractInvoiceId(order);
       if (invoiceId && invoiceMap.has(invoiceId)) {
@@ -98,7 +94,7 @@ async function runOrderSync(token) {
     }
 
     // Fetch CANCELLED orders → mark as cancelled
-    const cancelled = await fetchAllOrdersByStatus(useToken, "CANCELLED", fromDate);
+    const cancelled = await fetchAllOrdersByStatus(useToken, "CANCELLED");
     for (const order of cancelled) {
       const invoiceId = extractInvoiceId(order);
       if (invoiceId && invoiceMap.has(invoiceId)) {
