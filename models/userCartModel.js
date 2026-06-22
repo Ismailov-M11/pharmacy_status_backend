@@ -336,10 +336,20 @@ async function markMissingCartsDeleted(syncStartAt) {
     `UPDATE user_carts
      SET order_status = 'deleted', order_status_synced_at = NOW()
      WHERE last_synced_at < $1
-       AND order_status = 'pending'`,
+       AND order_status = 'pending'
+     RETURNING id`,
     [syncStartAt]
   );
-  return result.rowCount;
+  if (result.rows.length) {
+    const ids = result.rows.map((r) => r.id);
+    const histStatuses = ids.map(() => "__order__deleted");
+    await db.query(
+      `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
+       SELECT unnest($1::int[]), NULL, 'system', NOW(), unnest($2::varchar[])`,
+      [ids, histStatuses]
+    );
+  }
+  return result.rows.length;
 }
 
 async function getCartsForOrderSync() {
@@ -361,7 +371,9 @@ async function bulkUpdateOrderStatus(updates) {
   const ids = updates.map((u) => u.id);
   const statuses = updates.map((u) => u.orderStatus);
   const codes = updates.map((u) => u.orderCode ?? null);
-  await db.query(
+
+  // Update order status; collect which rows actually changed
+  const updated = await db.query(
     `UPDATE user_carts
      SET order_status = u.status,
          order_code = CASE WHEN u.code IS NOT NULL THEN u.code ELSE user_carts.order_code END,
@@ -373,9 +385,21 @@ async function bulkUpdateOrderStatus(updates) {
        AND (
          user_carts.order_status NOT IN ('delivered', 'cancelled', 'deleted')
          OR u.code IS NOT NULL
-       )`,
+       )
+     RETURNING user_carts.id, u.status AS new_status`,
     [ids, statuses, codes]
   );
+
+  // Write one history entry per changed cart
+  if (updated.rows.length) {
+    const histIds = updated.rows.map((r) => r.id);
+    const histStatuses = updated.rows.map((r) => `__order__${r.new_status}`);
+    await db.query(
+      `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
+       SELECT unnest($1::int[]), NULL, 'system', NOW(), unnest($2::varchar[])`,
+      [histIds, histStatuses]
+    );
+  }
 }
 
 module.exports = {
