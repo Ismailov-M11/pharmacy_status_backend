@@ -135,7 +135,7 @@ async function addComment(req, res) {
   try {
     const { id } = req.params;
     const { text, createdBy, status } = req.body;
-    if (!text || !text.trim()) return res.status(400).json({ error: "Comment text required" });
+    if (!status) return res.status(400).json({ error: "Status required" });
     const comment = await cartModel.addComment(parseInt(id), text, createdBy, status);
     res.json(comment);
   } catch (err) {
