@@ -25,7 +25,7 @@ function setProgress(current, total, phase) {
 async function fetchPage(token, page, size) {
   const response = await axios.post(
     DRAFT_LIST_URL,
-    { page, size },
+    { page, size, withoutUpdates: true },
     {
       headers: {
         Authorization: `Bearer ${token}`,
