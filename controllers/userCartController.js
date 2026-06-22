@@ -4,7 +4,7 @@ const syncService = require("../services/userCartSyncService");
 // GET /api/user-carts/data
 async function getData(req, res) {
   try {
-    const { search, status, pharmacies, sources, dateFrom, dateTo, itemsMin, itemsMax, totalMin, totalMax, promoCode, page = 0, size = 0 } = req.query;
+    const { search, status, pharmacies, sources, dateFrom, dateTo, itemsMin, itemsMax, totalMin, totalMax, promoCode, historyStatuses, historyDateFrom, historyDateTo, page = 0, size = 0 } = req.query;
 
     const filters = {
       search: search || "",
@@ -18,6 +18,9 @@ async function getData(req, res) {
       totalMin: totalMin || null,
       totalMax: totalMax || null,
       promoCode: promoCode || null,
+      historyStatuses: historyStatuses ? (Array.isArray(historyStatuses) ? historyStatuses : historyStatuses.split(",").filter(Boolean)) : [],
+      historyDateFrom: historyDateFrom || null,
+      historyDateTo: historyDateTo || null,
     };
 
     const parsedSize = parseInt(size);

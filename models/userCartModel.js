@@ -2,7 +2,7 @@ const db = require("../db");
 
 // ─── Filters ───────────────────────────────────────────────────────────────────
 function buildWhere(filters) {
-  const { search, status, pharmacies, sources, dateFrom, dateTo, itemsMin, itemsMax, totalMin, totalMax, promoCode } = filters;
+  const { search, status, pharmacies, sources, dateFrom, dateTo, itemsMin, itemsMax, totalMin, totalMax, promoCode, historyStatuses, historyDateFrom, historyDateTo } = filters;
   let where = "WHERE 1=1";
   const params = [];
   let idx = 1;
@@ -49,6 +49,22 @@ function buildWhere(filters) {
     where += ` AND LOWER(invoice_promo_code) LIKE LOWER($${idx++})`;
     params.push(`%${promoCode}%`);
   }
+  if (historyStatuses && historyStatuses.length) {
+    let subWhere = `h.status = ANY($${idx++})`;
+    params.push(historyStatuses);
+    if (historyDateFrom) {
+      subWhere += ` AND h.created_at >= $${idx++}`;
+      params.push(new Date(historyDateFrom));
+    }
+    if (historyDateTo) {
+      const to = new Date(historyDateTo);
+      to.setHours(23, 59, 59, 999);
+      subWhere += ` AND h.created_at <= $${idx++}`;
+      params.push(to);
+    }
+    where += ` AND id IN (SELECT DISTINCT cart_id FROM user_cart_comments h WHERE ${subWhere})`;
+  }
+
   if (search) {
     const q = `%${search}%`;
     where += ` AND (
@@ -209,7 +225,7 @@ async function updateComment(id, comment, commentBy) {
 // ─── Comment history ───────────────────────────────────────────────────────────
 async function getComments(cartId) {
   const r = await db.query(
-    `SELECT id, cart_id, text, created_by, created_at
+    `SELECT id, cart_id, text, created_by, created_at, status
      FROM user_cart_comments
      WHERE cart_id = $1
      ORDER BY created_at ASC`,
@@ -220,14 +236,16 @@ async function getComments(cartId) {
 
 async function addComment(cartId, text, createdBy, status) {
   if (!text || !text.trim()) throw new Error("Comment text required");
-  const validStatuses = ["unprocessed", "processed", "missed_call"];
-  const cartStatus = validStatuses.includes(status) ? status : "processed";
+
+  // Validate status against cart_statuses table; fallback to 'processed'
+  const statusCheck = await db.query("SELECT value FROM cart_statuses WHERE value = $1", [status]);
+  const cartStatus = statusCheck.rows.length > 0 ? status : "processed";
 
   const inserted = await db.query(
-    `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at)
-     VALUES ($1, $2, $3, NOW())
-     RETURNING id, cart_id, text, created_by, created_at`,
-    [cartId, text.trim(), createdBy]
+    `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
+     VALUES ($1, $2, $3, NOW(), $4)
+     RETURNING id, cart_id, text, created_by, created_at, status`,
+    [cartId, text.trim(), createdBy, cartStatus]
   );
 
   await db.query(

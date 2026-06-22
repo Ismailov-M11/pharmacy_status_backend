@@ -227,6 +227,11 @@ async function initializeDatabase() {
       CREATE INDEX IF NOT EXISTS idx_cart_comments_cart ON user_cart_comments(cart_id, created_at);
     `);
 
+    // Add status column to user_cart_comments (for history tracking)
+    await pool.query(`
+      ALTER TABLE user_cart_comments ADD COLUMN IF NOT EXISTS status VARCHAR(50);
+    `);
+
     // Create cart_statuses table for dynamic status management
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cart_statuses (
