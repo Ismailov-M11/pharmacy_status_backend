@@ -323,11 +323,11 @@ async function createStatus(label, createdBy) {
 
 async function getCartsForOrderSync() {
   const r = await db.query(`
-    SELECT id, invoice_id, creation_date
+    SELECT id, invoice_id, customer_phone
     FROM user_carts
     WHERE invoice_id IS NOT NULL
+      AND customer_phone IS NOT NULL
       AND order_status IN ('pending', 'in_progress')
-    ORDER BY creation_date ASC
   `);
   return r.rows;
 }

@@ -7,42 +7,31 @@ const ORDER_LIST_URL = "https://api.davodelivery.uz/api/order/list";
 let isSyncing = false;
 let lastSyncAt = null;
 let lastSyncError = null;
-let lastSyncResult = { delivered: 0, cancelled: 0, checked: 0 };
+let lastSyncResult = { delivered: 0, cancelled: 0, inProgress: 0, checked: 0 };
 let savedDavoToken = null;
 
-async function fetchOrderPage(token, status, page, size) {
-  const response = await axios.post(
-    ORDER_LIST_URL,
-    { status, page, size },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
-    }
-  );
-  const payload = response.data?.payload;
-  if (!payload) throw new Error("Unexpected API response from order/list");
-  return payload; // { list, total }
-}
-
-async function fetchAllOrdersByStatus(token, status) {
+async function fetchOrdersByPhone(token, phone) {
   const size = 100;
-  const first = await fetchOrderPage(token, status, 0, size);
-  const total = first.total || 0;
-  const all = [...(first.list || [])];
-  const totalPages = Math.ceil(total / size);
-  for (let page = 1; page < totalPages; page++) {
-    const data = await fetchOrderPage(token, status, page, size);
-    all.push(...(data.list || []));
-  }
-  return all;
-}
+  const body = { searchKey: phone, page: 0, size };
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
 
-function extractInvoiceId(order) {
-  // Handle different possible API response shapes
-  return order.invoice?.id ?? order.invoiceId ?? order.invoice_id ?? null;
+  const first = await axios.post(ORDER_LIST_URL, body, { headers, timeout: 30000 });
+  const payload = first.data?.payload;
+  if (!payload) throw new Error(`Unexpected API response for phone ${phone}`);
+
+  const total = payload.total || 0;
+  const all = [...(payload.list || [])];
+  const totalPages = Math.ceil(total / size);
+
+  for (let page = 1; page < totalPages; page++) {
+    const res = await axios.post(ORDER_LIST_URL, { ...body, page }, { headers, timeout: 30000 });
+    all.push(...(res.data?.payload?.list || []));
+  }
+
+  return all;
 }
 
 async function runOrderSync(token) {
@@ -56,59 +45,62 @@ async function runOrderSync(token) {
   lastSyncError = null;
 
   try {
+    // Carts with invoice_id that haven't reached a terminal status yet
     const activeCarts = await cartModel.getCartsForOrderSync();
 
     if (!activeCarts.length) {
       lastSyncAt = new Date().toISOString();
-      lastSyncResult = { delivered: 0, cancelled: 0, checked: 0 };
+      lastSyncResult = { delivered: 0, cancelled: 0, inProgress: 0, checked: 0 };
       return lastSyncResult;
     }
 
-    // Build invoice_id → [cart_ids] map
-    const invoiceMap = new Map();
-
+    // Group by customer_phone; each phone → { invoice_id → cart_id }
+    const phoneMap = new Map(); // phone → Map<invoice_id, cart_id>
     for (const cart of activeCarts) {
-      if (!cart.invoice_id) continue;
-      if (!invoiceMap.has(cart.invoice_id)) invoiceMap.set(cart.invoice_id, []);
-      invoiceMap.get(cart.invoice_id).push(cart.id);
-    }
-
-    if (!invoiceMap.size) {
-      lastSyncAt = new Date().toISOString();
-      lastSyncResult = { delivered: 0, cancelled: 0, checked: activeCarts.length };
-      return lastSyncResult;
+      if (!cart.customer_phone || !cart.invoice_id) continue;
+      if (!phoneMap.has(cart.customer_phone)) phoneMap.set(cart.customer_phone, new Map());
+      phoneMap.get(cart.customer_phone).set(cart.invoice_id, cart.id);
     }
 
     const updates = [];
 
-    // Fetch COMPLETED orders → mark as delivered
-    const completed = await fetchAllOrdersByStatus(useToken, "COMPLETED");
-    for (const order of completed) {
-      const invoiceId = extractInvoiceId(order);
-      if (invoiceId && invoiceMap.has(invoiceId)) {
-        for (const cartId of invoiceMap.get(invoiceId)) {
-          updates.push({ id: cartId, orderStatus: "delivered" });
-        }
-        invoiceMap.delete(invoiceId);
+    for (const [phone, invoiceToCartId] of phoneMap) {
+      let orders;
+      try {
+        orders = await fetchOrdersByPhone(useToken, phone);
+      } catch (err) {
+        console.warn(`[OrderStatusSync] Failed to fetch orders for phone ${phone}:`, err.message);
+        continue;
       }
-    }
 
-    // Fetch CANCELLED orders → mark as cancelled
-    const cancelled = await fetchAllOrdersByStatus(useToken, "CANCELLED");
-    for (const order of cancelled) {
-      const invoiceId = extractInvoiceId(order);
-      if (invoiceId && invoiceMap.has(invoiceId)) {
-        for (const cartId of invoiceMap.get(invoiceId)) {
-          updates.push({ id: cartId, orderStatus: "cancelled" });
-        }
-        invoiceMap.delete(invoiceId);
+      // Build a map of invoice_id → order status from API response
+      const apiInvoiceStatus = new Map(); // invoice_id → 'COMPLETED' | 'CANCELLED' | 'ACTIVE'
+      for (const order of orders) {
+        const invoiceId = order.invoice?.id;
+        if (!invoiceId) continue;
+        apiInvoiceStatus.set(invoiceId, order.status);
       }
-    }
 
-    // Remaining in invoiceMap = active orders (not completed/cancelled) → in_progress
-    for (const [, cartIds] of invoiceMap) {
-      for (const cartId of cartIds) {
-        updates.push({ id: cartId, orderStatus: "in_progress" });
+      // For each cart belonging to this phone, determine new order_status
+      for (const [invoiceId, cartId] of invoiceToCartId) {
+        const apiStatus = apiInvoiceStatus.get(invoiceId);
+
+        if (apiStatus === undefined) {
+          // invoice_id not found in this customer's orders → leave as pending (no update)
+          continue;
+        }
+
+        let newOrderStatus;
+        if (apiStatus === "COMPLETED") {
+          newOrderStatus = "delivered";
+        } else if (apiStatus === "CANCELLED") {
+          newOrderStatus = "cancelled";
+        } else {
+          // NEW, CONFIRMED, READY, WAITING_FOR_COURIER, PICKED_UP, etc. → Доставляется
+          newOrderStatus = "in_progress";
+        }
+
+        updates.push({ id: cartId, orderStatus: newOrderStatus });
       }
     }
 
@@ -118,15 +110,16 @@ async function runOrderSync(token) {
 
     lastSyncAt = new Date().toISOString();
     lastSyncResult = {
-      delivered: updates.filter((u) => u.orderStatus === "delivered").length,
-      cancelled: updates.filter((u) => u.orderStatus === "cancelled").length,
+      delivered:  updates.filter((u) => u.orderStatus === "delivered").length,
+      cancelled:  updates.filter((u) => u.orderStatus === "cancelled").length,
       inProgress: updates.filter((u) => u.orderStatus === "in_progress").length,
-      checked: activeCarts.length,
+      checked:    activeCarts.length,
     };
 
     console.log(
       `[OrderStatusSync] Done. Checked: ${activeCarts.length}, ` +
-      `Delivered: ${lastSyncResult.delivered}, Cancelled: ${lastSyncResult.cancelled}`
+      `Delivered: ${lastSyncResult.delivered}, Cancelled: ${lastSyncResult.cancelled}, ` +
+      `In progress: ${lastSyncResult.inProgress}`
     );
     return lastSyncResult;
   } catch (err) {
