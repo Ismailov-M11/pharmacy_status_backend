@@ -331,6 +331,17 @@ async function createStatus(label, createdBy) {
   return r.rows[0];
 }
 
+async function markMissingCartsDeleted(syncStartAt) {
+  const result = await db.query(
+    `UPDATE user_carts
+     SET order_status = 'deleted', order_status_synced_at = NOW()
+     WHERE last_synced_at < $1
+       AND order_status = 'pending'`,
+    [syncStartAt]
+  );
+  return result.rowCount;
+}
+
 async function getCartsForOrderSync() {
   const r = await db.query(`
     SELECT id, invoice_id, customer_phone
@@ -380,6 +391,7 @@ module.exports = {
   getDistinctCommentUsers,
   getStatuses,
   createStatus,
+  markMissingCartsDeleted,
   getCartsForOrderSync,
   bulkUpdateOrderStatus,
 };

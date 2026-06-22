@@ -55,6 +55,8 @@ async function runSync(token) {
   lastSyncError = null;
   setProgress(0, 0, "collecting");
 
+  const syncStartAt = new Date(); // timestamp before first API call
+
   try {
     // First page to get total count
     const firstPage = await fetchPage(useToken, 0, PAGE_SIZE);
@@ -79,6 +81,13 @@ async function runSync(token) {
       if ((i + 1) % 50 === 0 || i === allItems.length - 1) {
         setProgress(i + 1, allItems.length, "saving");
       }
+    }
+
+    // Mark carts that disappeared from draft/list as deleted
+    // (last_synced_at < syncStartAt means they were not touched in this sync)
+    const deletedCount = await cartModel.markMissingCartsDeleted(syncStartAt);
+    if (deletedCount > 0) {
+      console.log(`[UserCartSync] Marked ${deletedCount} absent carts as deleted.`);
     }
 
     lastSyncAt = new Date().toISOString();
