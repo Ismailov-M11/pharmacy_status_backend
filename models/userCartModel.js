@@ -119,7 +119,15 @@ async function getCartsPaginated(filters = {}, page = 0, size = 50) {
 async function getAllCarts(filters = {}) {
   const { where, params } = buildWhere(filters);
   const result = await db.query(
-    `SELECT ${SELECT_COLS} FROM user_carts ${where} ORDER BY creation_date DESC`,
+    `SELECT ${SELECT_COLS},
+       cc.claimed_by AS claimed_by,
+       cc.claimed_at AS claimed_at
+     FROM user_carts
+     LEFT JOIN customer_claims cc
+       ON cc.customer_phone = user_carts.customer_phone
+       AND cc.claimed_at > NOW() - INTERVAL '15 minutes'
+     ${where}
+     ORDER BY creation_date DESC`,
     params
   );
   return result.rows;
@@ -402,6 +410,35 @@ async function bulkUpdateOrderStatus(updates) {
   }
 }
 
+async function claimCustomer(customerPhone, username) {
+  // Check if someone else currently has an active claim
+  const existing = await db.query(
+    `SELECT claimed_by FROM customer_claims
+     WHERE customer_phone = $1 AND claimed_at > NOW() - INTERVAL '15 minutes'`,
+    [customerPhone]
+  );
+  const previousClaimer = existing.rows.length > 0 && existing.rows[0].claimed_by !== username
+    ? existing.rows[0].claimed_by
+    : null;
+
+  await db.query(
+    `INSERT INTO customer_claims (customer_phone, claimed_by, claimed_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (customer_phone) DO UPDATE
+       SET claimed_by = $2, claimed_at = NOW()`,
+    [customerPhone, username]
+  );
+  return previousClaimer;
+}
+
+async function releaseCustomer(customerPhone, username) {
+  await db.query(
+    `DELETE FROM customer_claims
+     WHERE customer_phone = $1 AND claimed_by = $2`,
+    [customerPhone, username]
+  );
+}
+
 module.exports = {
   getCartsPaginated,
   getAllCarts,
@@ -418,4 +455,6 @@ module.exports = {
   markMissingCartsDeleted,
   getCartsForOrderSync,
   bulkUpdateOrderStatus,
+  claimCustomer,
+  releaseCustomer,
 };

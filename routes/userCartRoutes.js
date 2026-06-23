@@ -14,5 +14,7 @@ router.post("/:id/comments", ctrl.addComment);
 router.get("/statuses", ctrl.getStatuses);
 router.post("/statuses", ctrl.createStatus);
 router.get("/filter-options", ctrl.getFilterOptions);
+router.post("/claim", ctrl.claimCustomer);
+router.delete("/claim", ctrl.releaseCustomer);
 
 module.exports = router;

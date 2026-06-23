@@ -210,4 +210,30 @@ async function triggerOrderSync(req, res) {
   }
 }
 
-module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getComments, addComment, getFilterOptions, getStatuses, createStatus, getOrderSyncStatus, triggerOrderSync };
+// POST /api/user-carts/claim
+async function claimCustomer(req, res) {
+  try {
+    const { customerPhone, username } = req.body;
+    if (!customerPhone || !username) return res.status(400).json({ error: "customerPhone and username required" });
+    const previousClaimer = await cartModel.claimCustomer(customerPhone, username);
+    res.json({ success: true, previousClaimer });
+  } catch (err) {
+    console.error("[UserCartController] claimCustomer error:", err);
+    res.status(500).json({ error: "Failed to claim customer" });
+  }
+}
+
+// DELETE /api/user-carts/claim
+async function releaseCustomer(req, res) {
+  try {
+    const { customerPhone, username } = req.body;
+    if (!customerPhone || !username) return res.status(400).json({ error: "customerPhone and username required" });
+    await cartModel.releaseCustomer(customerPhone, username);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[UserCartController] releaseCustomer error:", err);
+    res.status(500).json({ error: "Failed to release customer" });
+  }
+}
+
+module.exports = { getData, getStats, getSyncStatus, triggerSync, updateComment, getComments, addComment, getFilterOptions, getStatuses, createStatus, getOrderSyncStatus, triggerOrderSync, claimCustomer, releaseCustomer };

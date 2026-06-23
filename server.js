@@ -254,6 +254,15 @@ async function initializeDatabase() {
       ALTER TABLE user_carts ADD COLUMN IF NOT EXISTS order_code VARCHAR(20) NULL;
     `);
 
+    // Create customer_claims table for claim/lock feature
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS customer_claims (
+        customer_phone VARCHAR(20) PRIMARY KEY,
+        claimed_by     VARCHAR(100) NOT NULL,
+        claimed_at     TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+
     // Create cart_statuses table for dynamic status management
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cart_statuses (
