@@ -69,6 +69,7 @@ function buildWhere(filters) {
     const q = `%${search}%`;
     where += ` AND (
       CAST(id AS TEXT) LIKE $${idx} OR
+      CAST(customer_id AS TEXT) LIKE $${idx} OR
       customer_phone ILIKE $${idx} OR
       customer_first_name ILIKE $${idx} OR
       customer_last_name ILIKE $${idx} OR
