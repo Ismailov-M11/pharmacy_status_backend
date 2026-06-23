@@ -119,15 +119,16 @@ async function getCartsPaginated(filters = {}, page = 0, size = 50) {
 async function getAllCarts(filters = {}) {
   const { where, params } = buildWhere(filters);
   const result = await db.query(
-    `SELECT ${SELECT_COLS},
-       cc.claimed_by AS claimed_by,
-       cc.claimed_at AS claimed_at
-     FROM user_carts
+    `SELECT sq.*, cc.claimed_by, cc.claimed_at
+     FROM (
+       SELECT ${SELECT_COLS}
+       FROM user_carts
+       ${where}
+     ) sq
      LEFT JOIN customer_claims cc
-       ON cc.customer_phone = user_carts.customer_phone
+       ON cc.customer_phone = sq.customer_phone
        AND cc.claimed_at > NOW() - INTERVAL '15 minutes'
-     ${where}
-     ORDER BY creation_date DESC`,
+     ORDER BY sq.creation_date DESC`,
     params
   );
   return result.rows;
