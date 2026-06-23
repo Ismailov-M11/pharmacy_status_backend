@@ -432,16 +432,20 @@ async function bulkUpdateOrderStatus(updates) {
 }
 
 async function claimCustomer(customerPhone, username) {
-  // Check if someone else currently has an active claim
   const existing = await db.query(
     `SELECT claimed_by FROM customer_claims
      WHERE customer_phone = $1 AND claimed_at > NOW() - INTERVAL '15 minutes'`,
     [customerPhone]
   );
-  const previousClaimer = existing.rows.length > 0 && existing.rows[0].claimed_by !== username
-    ? existing.rows[0].claimed_by
-    : null;
 
+  const existingClaimer = existing.rows.length > 0 ? existing.rows[0].claimed_by : null;
+
+  // If someone else holds an active claim — don't overwrite it, just return their name
+  if (existingClaimer && existingClaimer !== username) {
+    return existingClaimer;
+  }
+
+  // No active claim or it's our own — (re)claim it
   await db.query(
     `INSERT INTO customer_claims (customer_phone, claimed_by, claimed_at)
      VALUES ($1, $2, NOW())
@@ -449,7 +453,7 @@ async function claimCustomer(customerPhone, username) {
        SET claimed_by = $2, claimed_at = NOW()`,
     [customerPhone, username]
   );
-  return previousClaimer;
+  return null;
 }
 
 async function releaseCustomer(customerPhone, username) {
