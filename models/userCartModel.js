@@ -272,17 +272,36 @@ async function addComment(cartId, text, createdBy, status) {
   );
 
   if (trimmedText) {
-    // Update cart comment + status when text is provided
     await db.query(
       `UPDATE user_carts SET comment = $1, comment_by = $2, comment_at = NOW(), cart_status = $3 WHERE id = $4`,
       [trimmedText, createdBy, cartStatus, cartId]
     );
   } else {
-    // Status-only change — don't overwrite existing comment text
     await db.query(
       `UPDATE user_carts SET cart_status = $1 WHERE id = $2`,
       [cartStatus, cartId]
     );
+  }
+
+  // Cascade status to all other carts of the same customer
+  const cartInfo = await db.query('SELECT customer_phone FROM user_carts WHERE id = $1', [cartId]);
+  if (cartInfo.rows.length > 0 && cartInfo.rows[0].customer_phone) {
+    const phone = cartInfo.rows[0].customer_phone;
+    const others = await db.query(
+      `UPDATE user_carts SET cart_status = $1
+       WHERE customer_phone = $2 AND id != $3
+       RETURNING id`,
+      [cartStatus, phone, cartId]
+    );
+    if (others.rows.length > 0) {
+      const otherIds = others.rows.map(r => r.id);
+      const histStatuses = otherIds.map(() => cartStatus);
+      await db.query(
+        `INSERT INTO user_cart_comments (cart_id, text, created_by, created_at, status)
+         SELECT unnest($1::int[]), '', $2, NOW(), unnest($3::varchar[])`,
+        [otherIds, createdBy, histStatuses]
+      );
+    }
   }
 
   return inserted.rows[0];
