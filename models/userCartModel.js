@@ -279,8 +279,8 @@ async function addComment(cartId, text, createdBy, status) {
     );
   } else {
     await db.query(
-      `UPDATE user_carts SET cart_status = $1 WHERE id = $2`,
-      [cartStatus, cartId]
+      `UPDATE user_carts SET cart_status = $1, comment_by = $2, comment_at = NOW() WHERE id = $3`,
+      [cartStatus, createdBy, cartId]
     );
   }
 
@@ -289,10 +289,10 @@ async function addComment(cartId, text, createdBy, status) {
   if (cartInfo.rows.length > 0 && cartInfo.rows[0].customer_phone) {
     const phone = cartInfo.rows[0].customer_phone;
     const others = await db.query(
-      `UPDATE user_carts SET cart_status = $1
-       WHERE customer_phone = $2 AND id != $3
+      `UPDATE user_carts SET cart_status = $1, comment_by = $2, comment_at = NOW()
+       WHERE customer_phone = $3 AND id != $4
        RETURNING id`,
-      [cartStatus, phone, cartId]
+      [cartStatus, createdBy, phone, cartId]
     );
     if (others.rows.length > 0) {
       const otherIds = others.rows.map(r => r.id);
