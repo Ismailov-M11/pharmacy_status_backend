@@ -50,32 +50,51 @@ function buildWhere(filters) {
     params.push(`%${promoCode}%`);
   }
   if (historyStatuses && historyStatuses.length) {
-    let subWhere = `h.status = ANY($${idx++})`;
+    // Sub-selects that yield the ids of "matching" carts. Start with history entries.
+    let histWhere = `status = ANY($${idx++})`;
     params.push(historyStatuses);
     if (historyDateFrom) {
-      subWhere += ` AND h.created_at >= $${idx++}`;
+      histWhere += ` AND created_at >= $${idx++}`;
       params.push(new Date(historyDateFrom));
     }
     if (historyDateTo) {
       const to = new Date(historyDateTo);
       to.setHours(23, 59, 59, 999);
-      subWhere += ` AND h.created_at <= $${idx++}`;
+      histWhere += ` AND created_at <= $${idx++}`;
       params.push(to);
     }
+    const matchSelects = [`SELECT cart_id AS id FROM user_cart_comments WHERE ${histWhere}`];
+
+    // When no period is specified, also match the cart's CURRENT status. History rows may
+    // be missing for older status changes, but the current order_status/cart_status still
+    // reflects the state shown in the table — so the filter stays reliable.
+    if (!historyDateFrom && !historyDateTo) {
+      const orderVals = historyStatuses.filter((s) => s.startsWith("__order__")).map((s) => s.slice("__order__".length));
+      const cartVals = historyStatuses.filter((s) => !s.startsWith("__order__"));
+      if (orderVals.length) {
+        matchSelects.push(`SELECT id FROM user_carts WHERE order_status = ANY($${idx++})`);
+        params.push(orderVals);
+      }
+      if (cartVals.length) {
+        matchSelects.push(`SELECT id FROM user_carts WHERE cart_status = ANY($${idx++})`);
+        params.push(cartVals);
+      }
+    }
+    const matchUnion = matchSelects.join(" UNION ");
+
     // Return the whole customer group (all carts sharing customer_phone) when any of the
-    // customer's carts has a matching history entry. This lets the client combine the
-    // history-status filter with the "Кем" filter at the group level, since the status and
-    // the comment may live on different carts of the same customer.
-    // Both sub-selects reference the same $N placeholders (re-using them is valid SQL —
-    // no extra params), and the OR branch covers carts with no customer_phone.
+    // customer's carts matches. This lets the client combine the history-status filter with
+    // the "Кем" filter at the group level, since the status and the comment may live on
+    // different carts of the same customer. The OR branch covers carts with no phone.
+    // Both occurrences of matchUnion reference the same $N placeholders (valid SQL — no
+    // extra params needed).
     where += ` AND (
       customer_phone IN (
         SELECT DISTINCT c.customer_phone
         FROM user_carts c
-        WHERE c.customer_phone IS NOT NULL
-          AND c.id IN (SELECT DISTINCT cart_id FROM user_cart_comments h WHERE ${subWhere})
+        WHERE c.customer_phone IS NOT NULL AND c.id IN (${matchUnion})
       )
-      OR id IN (SELECT DISTINCT cart_id FROM user_cart_comments h WHERE ${subWhere})
+      OR id IN (${matchUnion})
     )`;
   }
 
