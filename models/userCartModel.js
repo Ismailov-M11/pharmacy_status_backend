@@ -200,8 +200,14 @@ async function upsertCart(cart) {
       latitude              = EXCLUDED.latitude,
       longitude             = EXCLUDED.longitude,
       order_status          = CASE
+        -- A cart that already became a real order (has an order_code, or a non-pending
+        -- order status) must NOT be reset to 'deleted' just because the source draft is
+        -- flagged deleted — that flag means "no longer an active draft" (it was checked
+        -- out), not that the order was cancelled/deleted.
+        WHEN user_carts.order_code IS NOT NULL
+             OR user_carts.order_status IN ('delivered', 'cancelled', 'in_progress')
+          THEN user_carts.order_status
         WHEN $28 = 'deleted' THEN 'deleted'
-        WHEN user_carts.order_status IN ('delivered', 'cancelled', 'deleted') THEN user_carts.order_status
         ELSE user_carts.order_status
       END,
       last_synced_at        = NOW()
@@ -404,11 +410,14 @@ async function getCartsForOrderSync() {
       AND (
         order_status IN ('pending', 'in_progress')
         OR (order_status IN ('delivered', 'cancelled') AND order_code IS NULL)
-        -- Carts that just disappeared from drafts get marked 'deleted', but many of
-        -- them actually became real orders (checkout). Re-check recently-deleted carts
-        -- with no order_code: if a matching order is found they are revived below.
-        OR (order_status = 'deleted' AND order_code IS NULL
-            AND order_status_synced_at > NOW() - INTERVAL '3 days')
+        -- Carts that disappeared from drafts (or whose draft is flagged deleted) get
+        -- marked 'deleted', but many actually became real orders. Re-check:
+        --  • deleted carts that already carry an order_code (definitely a real order that
+        --    was wrongly marked deleted) — recover them regardless of age;
+        --  • recently-deleted carts with no code — candidates that may be orders.
+        OR (order_status = 'deleted'
+            AND (order_code IS NOT NULL
+                 OR order_status_synced_at > NOW() - INTERVAL '3 days'))
       )
   `);
   return r.rows;
