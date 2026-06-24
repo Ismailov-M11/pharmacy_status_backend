@@ -62,7 +62,21 @@ function buildWhere(filters) {
       subWhere += ` AND h.created_at <= $${idx++}`;
       params.push(to);
     }
-    where += ` AND id IN (SELECT DISTINCT cart_id FROM user_cart_comments h WHERE ${subWhere})`;
+    // Return the whole customer group (all carts sharing customer_phone) when any of the
+    // customer's carts has a matching history entry. This lets the client combine the
+    // history-status filter with the "Кем" filter at the group level, since the status and
+    // the comment may live on different carts of the same customer.
+    // Both sub-selects reference the same $N placeholders (re-using them is valid SQL —
+    // no extra params), and the OR branch covers carts with no customer_phone.
+    where += ` AND (
+      customer_phone IN (
+        SELECT DISTINCT c.customer_phone
+        FROM user_carts c
+        WHERE c.customer_phone IS NOT NULL
+          AND c.id IN (SELECT DISTINCT cart_id FROM user_cart_comments h WHERE ${subWhere})
+      )
+      OR id IN (SELECT DISTINCT cart_id FROM user_cart_comments h WHERE ${subWhere})
+    )`;
   }
 
   if (search) {
