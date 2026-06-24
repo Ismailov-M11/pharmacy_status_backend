@@ -390,6 +390,11 @@ async function getCartsForOrderSync() {
       AND (
         order_status IN ('pending', 'in_progress')
         OR (order_status IN ('delivered', 'cancelled') AND order_code IS NULL)
+        -- Carts that just disappeared from drafts get marked 'deleted', but many of
+        -- them actually became real orders (checkout). Re-check recently-deleted carts
+        -- with no order_code: if a matching order is found they are revived below.
+        OR (order_status = 'deleted' AND order_code IS NULL
+            AND order_status_synced_at > NOW() - INTERVAL '3 days')
       )
   `);
   return r.rows;
@@ -412,7 +417,10 @@ async function bulkUpdateOrderStatus(updates) {
      ) u
      WHERE user_carts.id = u.id
        AND (
-         user_carts.order_status NOT IN ('delivered', 'cancelled', 'deleted')
+         -- 'deleted' is intentionally NOT protected here: a deleted cart only reaches
+         -- this update when a matching order was found by invoice_id (i.e. it really
+         -- became an order), so it should be revived to its true status.
+         user_carts.order_status NOT IN ('delivered', 'cancelled')
          OR u.code IS NOT NULL
        )
      RETURNING user_carts.id, u.status AS new_status`,
