@@ -106,7 +106,7 @@ async function runSync(token) {
 // ─── Cron: daily at 12:00 Tashkent time ──────────────────────────────────────
 function startUserCartCron() {
   cron.schedule(
-    "0 12 * * *",
+    "*/30 * * * *",
     async () => {
       console.log("[UserCartSync] Starting scheduled sync...");
       try {
@@ -117,7 +117,7 @@ function startUserCartCron() {
     },
     { timezone: "Asia/Tashkent" }
   );
-  console.log("[UserCartSync] Cron scheduled: daily at 12:00 Tashkent time.");
+  console.log("[UserCartSync] Cron scheduled: every 30 minutes (Tashkent time).");
 }
 
 function getSyncState() {

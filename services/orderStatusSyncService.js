@@ -139,7 +139,7 @@ async function runOrderSync(token) {
 
 function startOrderStatusCron() {
   cron.schedule(
-    "0 12 * * *",
+    "*/30 * * * *",
     async () => {
       console.log("[OrderStatusSync] Starting scheduled sync...");
       try {
@@ -150,7 +150,7 @@ function startOrderStatusCron() {
     },
     { timezone: "Asia/Tashkent" }
   );
-  console.log("[OrderStatusSync] Cron scheduled: daily at 12:00 Tashkent time.");
+  console.log("[OrderStatusSync] Cron scheduled: every 30 minutes (Tashkent time).");
 }
 
 function getOrderSyncState() {
