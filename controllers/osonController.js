@@ -293,11 +293,19 @@ async function searchStock(req, res) {
       });
     }
 
-    // Load ALL connected pharmacy data for coordinate enrichment (slug → lat/lon lookup)
-    const pharmacyData = await osonModel.getConnectedPharmacyData(null, null);
+    // Load connected pharmacies for the selected region (for posSlugList + coord enrichment)
+    const pharmacyData = await osonModel.getConnectedPharmacyData(
+      parentRegion,
+      region || null
+    );
 
+    const posSlugList = pharmacyData.map((p) => p.slug);
     const pharmacyMap = {};
     pharmacyData.forEach((p) => { pharmacyMap[p.slug] = p; });
+
+    if (posSlugList.length === 0) {
+      return res.json({ pharmacies: [], totalPharmacies: 0 });
+    }
 
     const productList = drugs.map((d) => ({
       slug: d.id,
@@ -307,18 +315,19 @@ async function searchStock(req, res) {
     const stockRequestBody = {
       productList,
       regionList: [1],
-      posSlugList: [],
+      posSlugList,
       latitude: null,
       longitude: null,
       maxDistance: 500000,
       isOnline: true,
       sortBy: "price",
-      pageSize: 100,
+      pageSize: 200,
       page: 1,
     };
 
     console.log("[Medicine] stock-search → OSON request:", JSON.stringify({
       url: `${OSON_API_BASE}/Pos/ProductList`,
+      posSlugListCount: posSlugList.length,
       productList,
     }, null, 2));
 
@@ -337,6 +346,31 @@ async function searchStock(req, res) {
     console.log("[Medicine] stock-search ← OSON status:", response.status, "| Succeeded:", response.data?.Succeeded, "| Items:", response.data?.Data?.Items?.length ?? 0);
 
     const items = response.data?.Data?.Items || [];
+
+    // Enrich coordinates: for pharmacies missing from DB, fetch from OSON Location API in parallel
+    const missingCoordSlugs = items
+      .filter((item) => !pharmacyMap[item.Slug]?.latitude)
+      .map((item) => item.Slug);
+
+    if (missingCoordSlugs.length > 0) {
+      const locationResults = await Promise.allSettled(
+        missingCoordSlugs.map((slug) =>
+          axios.get(`${OSON_API_BASE}/POS/Location/${slug}`, {
+            headers: { accept: "application/json", Authorization: `Bearer ${savedToken}` },
+            timeout: 8000,
+          }).then((r) => ({ slug, data: r.data?.Data }))
+        )
+      );
+      locationResults.forEach((r) => {
+        if (r.status === "fulfilled" && r.value.data?.Latitude) {
+          pharmacyMap[r.value.slug] = {
+            ...pharmacyMap[r.value.slug],
+            latitude: r.value.data.Latitude,
+            longitude: r.value.data.Longitude,
+          };
+        }
+      });
+    }
 
     const pharmacies = items.map((item) => {
       const db = pharmacyMap[item.Slug] || {};
