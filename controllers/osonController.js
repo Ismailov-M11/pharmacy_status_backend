@@ -649,6 +649,26 @@ async function searchOrders(req, res) {
   }
 }
 
+async function imageProxy(req, res) {
+  const { url } = req.query;
+  if (!url) return res.status(400).end();
+  try {
+    const resp = await axios.get(url, {
+      responseType: "stream",
+      timeout: 8000,
+      headers: {
+        Authorization: `Bearer ${osonSyncService.getSavedToken()}`,
+        "User-Agent": "Mozilla/5.0",
+      },
+    });
+    res.setHeader("Content-Type", resp.headers["content-type"] || "image/jpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    resp.data.pipe(res);
+  } catch {
+    res.status(404).end();
+  }
+}
+
 module.exports = {
   getData,
   getStats,
@@ -661,4 +681,5 @@ module.exports = {
   getPharmacyLocation,
   getDrugDetail,
   searchOrders,
+  imageProxy,
 };

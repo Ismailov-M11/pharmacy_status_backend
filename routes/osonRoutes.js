@@ -36,4 +36,7 @@ router.post("/medicine/drug-detail", osonController.getDrugDetail);
 // POST /api/oson/medicine/order-search  { searchKey, page?, size? }
 router.post("/medicine/order-search", osonController.searchOrders);
 
+// GET /api/oson/medicine/image-proxy?url=...
+router.get("/medicine/image-proxy", osonController.imageProxy);
+
 module.exports = router;
