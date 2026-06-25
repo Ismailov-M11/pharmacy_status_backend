@@ -293,17 +293,9 @@ async function searchStock(req, res) {
       });
     }
 
-    // Load connected pharmacy data (slug + coords) for the selected region
-    const pharmacyData = await osonModel.getConnectedPharmacyData(
-      parentRegion,
-      region || null
-    );
+    // Load ALL connected pharmacy data for coordinate enrichment (slug → lat/lon lookup)
+    const pharmacyData = await osonModel.getConnectedPharmacyData(null, null);
 
-    if (pharmacyData.length === 0) {
-      return res.json({ pharmacies: [], totalPharmacies: 0 });
-    }
-
-    const posSlugList = pharmacyData.map((p) => p.slug);
     const pharmacyMap = {};
     pharmacyData.forEach((p) => { pharmacyMap[p.slug] = p; });
 
@@ -314,8 +306,8 @@ async function searchStock(req, res) {
 
     const stockRequestBody = {
       productList,
-      regionList: [],
-      posSlugList,
+      regionList: [1],
+      posSlugList: [],
       latitude: null,
       longitude: null,
       maxDistance: 500000,
@@ -327,7 +319,6 @@ async function searchStock(req, res) {
 
     console.log("[Medicine] stock-search → OSON request:", JSON.stringify({
       url: `${OSON_API_BASE}/Pos/ProductList`,
-      posSlugListCount: posSlugList.length,
       productList,
     }, null, 2));
 
@@ -396,6 +387,48 @@ async function searchStock(req, res) {
   }
 }
 
+/**
+ * GET /api/oson/medicine/pharmacy-location/:slug
+ * Returns lat/lon for a pharmacy slug — first from our DB, falls back to OSON Location API.
+ */
+async function getPharmacyLocation(req, res) {
+  try {
+    const { slug } = req.params;
+    const db = require("../db");
+
+    // Try DB first (fast path — direct slug lookup)
+    const dbResult = await db.query(
+      "SELECT latitude::float AS latitude, longitude::float AS longitude FROM oson_pharmacies WHERE slug = $1",
+      [slug]
+    );
+    if (dbResult.rows.length > 0 && dbResult.rows[0].latitude) {
+      const { latitude, longitude } = dbResult.rows[0];
+      return res.json({ slug, latitude, longitude });
+    }
+
+    // Fall back to OSON Location API
+    const savedToken = osonSyncService.getSavedToken();
+    if (!savedToken) {
+      return res.status(503).json({ error: "OSON token not available" });
+    }
+
+    const response = await axios.get(`${OSON_API_BASE}/POS/Location/${slug}`, {
+      headers: { accept: "application/json", Authorization: `Bearer ${savedToken}` },
+      timeout: 10000,
+    });
+
+    if (response.data?.Succeeded && response.data?.Data) {
+      const { Latitude, Longitude } = response.data.Data;
+      return res.json({ slug, latitude: Latitude, longitude: Longitude });
+    }
+
+    res.status(404).json({ error: "Location not found" });
+  } catch (error) {
+    console.error("[Medicine] Location error:", error.message);
+    res.status(500).json({ error: "Location lookup failed" });
+  }
+}
+
 module.exports = {
   getData,
   getStats,
@@ -405,4 +438,5 @@ module.exports = {
   getMedicineFilterOptions,
   searchDrugCatalog,
   searchStock,
+  getPharmacyLocation,
 };

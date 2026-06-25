@@ -27,4 +27,7 @@ router.post("/medicine/drug-search", osonController.searchDrugCatalog);
 // POST /api/oson/medicine/stock-search  { drugs, parentRegion, region? }
 router.post("/medicine/stock-search", osonController.searchStock);
 
+// GET /api/oson/medicine/pharmacy-location/:slug
+router.get("/medicine/pharmacy-location/:slug", osonController.getPharmacyLocation);
+
 module.exports = router;
