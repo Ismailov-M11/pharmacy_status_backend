@@ -1,4 +1,5 @@
 const axios = require("axios");
+const db = require("../db");
 const osonModel = require("../models/osonPharmacyModel");
 const osonSyncService = require("../services/osonSyncService");
 
@@ -510,23 +511,45 @@ async function searchOrders(req, res) {
     const list = response.data?.payload?.list || [];
     const total = response.data?.payload?.total || 0;
 
-    const orders = list.map((order) => ({
-      id: order.id,
-      code: order.code,
-      status: order.status,
-      customerPhone: order.customer?.phone || null,
-      marketName: order.market?.name || null,
-      creationDate: order.creationDate,
-      items: (order.items || []).map((item) => ({
-        slug: item.slug,
-        name: item.name,
-        manufacturer: item.manufacturer || null,
-        brand: item.brand || null,
-        imageUrl: item.imageUrl || null,
-        quantity: item.quantity || 1,
-        price: item.price || 0,
-      })),
-    }));
+    // Enrich orders with region info from our oson_pharmacies table (by market slug)
+    const marketSlugs = list.map((o) => o.market?.slug).filter(Boolean);
+    const pharmacyRegionMap = {};
+    if (marketSlugs.length > 0) {
+      const regionResult = await db.query(
+        `SELECT slug, parent_region_ru, region_ru FROM oson_pharmacies WHERE slug = ANY($1)`,
+        [marketSlugs]
+      );
+      regionResult.rows.forEach((row) => {
+        pharmacyRegionMap[row.slug] = {
+          parentRegionRu: row.parent_region_ru,
+          regionRu: row.region_ru,
+        };
+      });
+    }
+
+    const orders = list.map((order) => {
+      const regionInfo = pharmacyRegionMap[order.market?.slug] || {};
+      return {
+        id: order.id,
+        code: order.code,
+        status: order.status,
+        customerPhone: order.customer?.phone || null,
+        marketName: order.market?.name || null,
+        marketSlug: order.market?.slug || null,
+        parentRegionRu: regionInfo.parentRegionRu || null,
+        regionRu: regionInfo.regionRu || null,
+        creationDate: order.creationDate,
+        items: (order.items || []).map((item) => ({
+          slug: item.slug,
+          name: item.name,
+          manufacturer: item.manufacturer || null,
+          brand: item.brand || null,
+          imageUrl: item.imageUrl || null,
+          quantity: item.quantity || 1,
+          price: item.price || 0,
+        })),
+      };
+    });
 
     res.json({ orders, total });
   } catch (error) {
