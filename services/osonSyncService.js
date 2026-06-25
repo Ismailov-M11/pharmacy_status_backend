@@ -413,8 +413,13 @@ function getSyncStatus() {
   };
 }
 
+function getSavedToken() {
+  return savedDavoToken;
+}
+
 module.exports = {
   triggerSync,
   startOsonCron,
   getSyncStatus,
+  getSavedToken,
 };

@@ -17,4 +17,14 @@ router.get("/sync-status", osonController.getSyncStatus);
 // GET /api/oson/filter-options?parentRegion=
 router.get("/filter-options", osonController.getFilterOptions);
 
+// ─── Medicine Search ──────────────────────────────────────────────────────────
+// GET /api/oson/medicine/filter-options?parentRegion=  (only connected pharmacies)
+router.get("/medicine/filter-options", osonController.getMedicineFilterOptions);
+
+// POST /api/oson/medicine/drug-search  { searchText }
+router.post("/medicine/drug-search", osonController.searchDrugCatalog);
+
+// POST /api/oson/medicine/stock-search  { drugs, parentRegion, region? }
+router.post("/medicine/stock-search", osonController.searchStock);
+
 module.exports = router;

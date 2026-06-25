@@ -276,11 +276,82 @@ async function getFilteredStats(filters = {}) {
   return result.rows[0];
 }
 
+async function getConnectedParentRegions() {
+  const result = await db.query(
+    `SELECT DISTINCT parent_region_ru, parent_region_uz
+     FROM oson_pharmacies
+     WHERE parent_region_ru IS NOT NULL AND oson_status = 'connected'
+     ORDER BY parent_region_ru`
+  );
+  return result.rows;
+}
+
+async function getConnectedRegions(parentRegion = null) {
+  let query = `SELECT DISTINCT region_ru, region_uz
+               FROM oson_pharmacies
+               WHERE region_ru IS NOT NULL AND oson_status = 'connected'`;
+  const params = [];
+
+  if (parentRegion) {
+    const prArray = (Array.isArray(parentRegion) ? parentRegion : parentRegion.split(","))
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (prArray.length > 0) {
+      query += ` AND (LOWER(parent_region_ru) = ANY($1) OR LOWER(parent_region_uz) = ANY($1))`;
+      params.push(prArray);
+    }
+  }
+
+  query += " ORDER BY region_ru";
+  const result = await db.query(query, params);
+  return result.rows;
+}
+
+async function getConnectedPharmacyData(parentRegion = null, region = null) {
+  let where = "WHERE oson_status = 'connected'";
+  const params = [];
+  let idx = 1;
+
+  if (parentRegion) {
+    const prArray = (Array.isArray(parentRegion) ? parentRegion : parentRegion.split(","))
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (prArray.length > 0) {
+      where += ` AND (LOWER(parent_region_ru) = ANY($${idx}) OR LOWER(parent_region_uz) = ANY($${idx}))`;
+      params.push(prArray);
+      idx++;
+    }
+  }
+
+  if (region) {
+    const rArray = (Array.isArray(region) ? region : region.split(","))
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (rArray.length > 0) {
+      where += ` AND (LOWER(region_ru) = ANY($${idx}) OR LOWER(region_uz) = ANY($${idx}))`;
+      params.push(rArray);
+      idx++;
+    }
+  }
+
+  const result = await db.query(
+    `SELECT slug, latitude::float, longitude::float,
+            name_ru, name_uz, address_ru, address_uz,
+            parent_region_ru, region_ru, phone, open_time, close_time
+     FROM oson_pharmacies ${where}`,
+    params
+  );
+  return result.rows;
+}
+
 module.exports = {
   getAllOsonPharmacies,
   getOsonPharmaciesPaginated,
   getDistinctParentRegions,
   getDistinctRegions,
+  getConnectedParentRegions,
+  getConnectedRegions,
+  getConnectedPharmacyData,
   getPharmacyBySlug,
   upsertPharmacy,
   updateStatusAndSyncedTime,

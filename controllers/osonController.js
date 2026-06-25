@@ -1,5 +1,8 @@
+const axios = require("axios");
 const osonModel = require("../models/osonPharmacyModel");
 const osonSyncService = require("../services/osonSyncService");
+
+const OSON_API_BASE = "https://dev-api.davodelivery.uz/api/oson";
 
 /**
  * GET /api/oson/data
@@ -174,10 +177,203 @@ async function getFilterOptions(req, res) {
   }
 }
 
+/**
+ * GET /api/oson/medicine/filter-options
+ * Returns parent regions and regions that have at least one connected pharmacy.
+ * Used by medicine search to populate region/city selectors.
+ */
+async function getMedicineFilterOptions(req, res) {
+  try {
+    const { parentRegion } = req.query;
+    const [parentRegions, regions] = await Promise.all([
+      osonModel.getConnectedParentRegions(),
+      osonModel.getConnectedRegions(parentRegion || null),
+    ]);
+    res.json({ parentRegions, regions });
+  } catch (error) {
+    console.error("[Medicine] getMedicineFilterOptions error:", error);
+    res.status(500).json({ error: "Failed to get connected filter options" });
+  }
+}
+
+/**
+ * POST /api/oson/medicine/drug-search
+ * Body: { searchText: string }
+ * Proxies to OSON Product/Search and returns formatted drug list.
+ */
+async function searchDrugCatalog(req, res) {
+  try {
+    const { searchText } = req.body;
+    if (!searchText || !searchText.trim()) {
+      return res.status(400).json({ error: "searchText is required" });
+    }
+
+    const savedToken = osonSyncService.getSavedToken();
+    if (!savedToken) {
+      return res.status(503).json({
+        error: "OSON token not available. Please trigger a sync from OSON Slug List first.",
+      });
+    }
+
+    const response = await axios.post(
+      `${OSON_API_BASE}/Product/Search`,
+      {
+        searchText: searchText.trim(),
+        showOnlyExistOnStore: true,
+        onlyApprovedStores: true,
+        isOnlineStores: true,
+        regionList: [],
+        pageSize: 50,
+        page: 1,
+      },
+      {
+        headers: {
+          accept: "application/json",
+          Authorization: `Bearer ${savedToken}`,
+        },
+        timeout: 15000,
+      }
+    );
+
+    const items = (response.data?.Data?.Items || []).map((item) => ({
+      id: item.Slug,
+      name: item.ProductName,
+      brand: item.BrandName || null,
+      manufacturer: item.ManufacturerName || null,
+      imageUrl: item.ImageURI || null,
+      minPrice: item.MinPrice || 0,
+      maxPrice: item.MaxPrice || 0,
+      byPrescription: item.IsByPrescription || false,
+    }));
+
+    res.json({ items });
+  } catch (error) {
+    console.error("[Medicine] Drug search error:", error.message);
+    if (error.response) {
+      return res.status(502).json({ error: "OSON API error: " + (error.response.statusText || "unknown") });
+    }
+    res.status(500).json({ error: "Drug search failed" });
+  }
+}
+
+/**
+ * POST /api/oson/medicine/stock-search
+ * Body: { drugs: [{ id, name, manufacturer, quantity }], parentRegion: string, region?: string }
+ * Fetches connected pharmacy slugs for the region, calls OSON stock API, enriches with DB coords.
+ */
+async function searchStock(req, res) {
+  try {
+    const { drugs, parentRegion, region } = req.body;
+
+    if (!drugs || !Array.isArray(drugs) || drugs.length === 0) {
+      return res.status(400).json({ error: "drugs array is required" });
+    }
+    if (!parentRegion) {
+      return res.status(400).json({ error: "parentRegion is required" });
+    }
+
+    const savedToken = osonSyncService.getSavedToken();
+    if (!savedToken) {
+      return res.status(503).json({
+        error: "OSON token not available. Please trigger a sync from OSON Slug List first.",
+      });
+    }
+
+    // Load connected pharmacy data (slug + coords) for the selected region
+    const pharmacyData = await osonModel.getConnectedPharmacyData(
+      parentRegion,
+      region || null
+    );
+
+    if (pharmacyData.length === 0) {
+      return res.json({ pharmacies: [], totalPharmacies: 0 });
+    }
+
+    const posSlugList = pharmacyData.map((p) => p.slug);
+    const pharmacyMap = {};
+    pharmacyData.forEach((p) => { pharmacyMap[p.slug] = p; });
+
+    const productList = drugs.map((d) => ({
+      slug: d.id,
+      quantity: Math.max(1, parseInt(d.quantity) || 1),
+    }));
+
+    const response = await axios.post(
+      `${OSON_API_BASE}/Pos/ProductList`,
+      {
+        productList,
+        regionList: [],
+        posSlugList,
+        latitude: null,
+        longitude: null,
+        maxDistance: 500000,
+        isOnline: true,
+        sortBy: "price",
+        pageSize: 100,
+        page: 1,
+      },
+      {
+        headers: {
+          accept: "application/json",
+          Authorization: `Bearer ${savedToken}`,
+        },
+        timeout: 30000,
+      }
+    );
+
+    const items = response.data?.Data?.Items || [];
+
+    const pharmacies = items.map((item) => {
+      const db = pharmacyMap[item.Slug] || {};
+      return {
+        id: item.Slug,
+        slug: item.Slug,
+        name: item.Name,
+        address: item.Address || db.address_ru || null,
+        landmark: item.Landmark || null,
+        regionName: item.RegionName || db.parent_region_ru || null,
+        distance: item.Distance || 0,
+        totalAmount: item.TotalAmount || 0,
+        latitude: db.latitude || null,
+        longitude: db.longitude || null,
+        phone: db.phone || null,
+        openTime: db.open_time || null,
+        closeTime: db.close_time || null,
+        products: (item.ProductList || []).map((p) => {
+          const reqDrug = drugs.find((d) => d.id === p.Slug);
+          const qty = reqDrug ? Math.max(1, parseInt(reqDrug.quantity) || 1) : 1;
+          return {
+            id: p.Slug,
+            name: p.ProductName,
+            brand: p.BrandName || null,
+            manufacturer: p.ManufacturerName || null,
+            price: p.Price || 0,
+            expiration: p.ExpirationDate || null,
+            stock: p.Quantity || 0,
+            quantity: qty,
+            total: (p.Price || 0) * qty,
+          };
+        }),
+      };
+    });
+
+    res.json({ pharmacies, totalPharmacies: pharmacies.length });
+  } catch (error) {
+    console.error("[Medicine] Stock search error:", error.message);
+    if (error.response) {
+      return res.status(502).json({ error: "OSON API error: " + (error.response.statusText || "unknown") });
+    }
+    res.status(500).json({ error: "Stock search failed" });
+  }
+}
+
 module.exports = {
   getData,
   getStats,
   triggerSync,
   getSyncStatus,
   getFilterOptions,
+  getMedicineFilterOptions,
+  searchDrugCatalog,
+  searchStock,
 };
