@@ -403,13 +403,14 @@ async function initializeDatabase() {
 const PORT = process.env.PORT || 5000;
 
 // Initialize database then start server
-initializeDatabase().then(() => {
+initializeDatabase().then(async () => {
   // Start Polling Service
   const pollingService = require('./services/pollingService');
   pollingService.startPolling();
 
   // Start OSON Cron Sync (daily at 12:00 Tashkent time)
   const osonSyncService = require('./services/osonSyncService');
+  await osonSyncService.restoreTokenFromDB();
   osonSyncService.startOsonCron();
 
   // Start Didox contract status polling (every 5 minutes)

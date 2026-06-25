@@ -1,5 +1,6 @@
 const axios = require("axios");
 const cron = require("node-cron");
+const db = require("../db");
 const osonModel = require("../models/osonPharmacyModel");
 
 // ─── OSON API Config ───────────────────────────────────────────────────────
@@ -373,8 +374,38 @@ async function runOsonSync(davoToken) {
   }
 }
 
+async function persistToken(token) {
+  try {
+    await db.query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ('oson_davo_token', $1, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [token]
+    );
+  } catch (err) {
+    console.warn("[OSON Sync] Failed to persist token to DB:", err.message);
+  }
+}
+
+async function restoreTokenFromDB() {
+  try {
+    const result = await db.query(
+      "SELECT value FROM app_settings WHERE key = 'oson_davo_token'"
+    );
+    if (result.rows.length > 0 && result.rows[0].value) {
+      savedDavoToken = result.rows[0].value;
+      console.log("[OSON Sync] Token restored from DB.");
+    }
+  } catch (err) {
+    console.warn("[OSON Sync] Failed to restore token from DB:", err.message);
+  }
+}
+
 async function triggerSync(davoToken) {
-  if (davoToken) savedDavoToken = davoToken;
+  if (davoToken) {
+    savedDavoToken = davoToken;
+    await persistToken(davoToken);
+  }
   return runOsonSync(savedDavoToken);
 }
 
@@ -422,4 +453,5 @@ module.exports = {
   startOsonCron,
   getSyncStatus,
   getSavedToken,
+  restoreTokenFromDB,
 };
