@@ -312,40 +312,50 @@ async function searchStock(req, res) {
       quantity: Math.max(1, parseInt(d.quantity) || 1),
     }));
 
-    const stockRequestBody = {
-      productList,
-      regionList: [1],
-      posSlugList,
-      latitude: null,
-      longitude: null,
-      maxDistance: 500000,
-      isOnline: true,
-      sortBy: "price",
-      pageSize: 200,
-      page: 1,
-    };
+    // OSON limits posSlugList to 100 items max — chunk and merge
+    const OSON_SLUG_LIMIT = 100;
+    const slugChunks = [];
+    for (let i = 0; i < posSlugList.length; i += OSON_SLUG_LIMIT) {
+      slugChunks.push(posSlugList.slice(i, i + OSON_SLUG_LIMIT));
+    }
 
     console.log("[Medicine] stock-search → OSON request:", JSON.stringify({
       url: `${OSON_API_BASE}/Pos/ProductList`,
       posSlugListCount: posSlugList.length,
+      chunks: slugChunks.length,
       productList,
     }, null, 2));
 
-    const response = await axios.post(
-      `${OSON_API_BASE}/Pos/ProductList`,
-      stockRequestBody,
-      {
-        headers: {
-          accept: "application/json",
-          Authorization: `Bearer ${savedToken}`,
-        },
-        timeout: 30000,
-      }
+    const chunkResponses = await Promise.all(
+      slugChunks.map((chunk) =>
+        axios.post(
+          `${OSON_API_BASE}/Pos/ProductList`,
+          {
+            productList,
+            regionList: [1],
+            posSlugList: chunk,
+            latitude: null,
+            longitude: null,
+            maxDistance: 500000,
+            isOnline: true,
+            sortBy: "price",
+            pageSize: 200,
+            page: 1,
+          },
+          {
+            headers: {
+              accept: "application/json",
+              Authorization: `Bearer ${savedToken}`,
+            },
+            timeout: 30000,
+          }
+        )
+      )
     );
 
-    console.log("[Medicine] stock-search ← OSON status:", response.status, "| Succeeded:", response.data?.Succeeded, "| Items:", response.data?.Data?.Items?.length ?? 0);
+    const items = chunkResponses.flatMap((r) => r.data?.Data?.Items || []);
 
-    const items = response.data?.Data?.Items || [];
+    console.log("[Medicine] stock-search ← OSON chunks:", chunkResponses.length, "| total Items:", items.length);
 
     // Enrich coordinates: for pharmacies missing from DB, fetch from OSON Location API in parallel
     const missingCoordSlugs = items
