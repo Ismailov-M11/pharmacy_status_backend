@@ -527,6 +527,29 @@ async function searchOrders(req, res) {
       });
     }
 
+    // Enrich item imageUrls via OSON Product/TileInfo (batch, for items with null imageUrl)
+    const allItemSlugs = [...new Set(
+      list.flatMap((o) => (o.items || []).map((i) => i.slug).filter(Boolean))
+    )];
+    const imageMap = {};
+    if (allItemSlugs.length > 0) {
+      try {
+        const tileRes = await axios.post(
+          `${OSON_API_BASE}/Product/TileInfo`,
+          { ProductSlugList: allItemSlugs, RegionList: [1, 2], ATCCode: null },
+          {
+            headers: { accept: "application/json", Authorization: `Bearer ${savedToken}` },
+            timeout: 10000,
+          }
+        );
+        (tileRes.data?.Data?.Items || []).forEach((ti) => {
+          if (ti.Slug && ti.ImageURI) imageMap[ti.Slug] = ti.ImageURI;
+        });
+      } catch (err) {
+        console.warn("[Medicine] TileInfo fetch failed:", err.message);
+      }
+    }
+
     const orders = list.map((order) => {
       const regionInfo = pharmacyRegionMap[order.market?.slug] || {};
       return {
@@ -544,7 +567,7 @@ async function searchOrders(req, res) {
           name: item.name,
           manufacturer: item.manufacturer || null,
           brand: item.brand || null,
-          imageUrl: item.imageUrl || null,
+          imageUrl: imageMap[item.slug] || item.imageUrl || null,
           quantity: item.quantity || 1,
           price: item.price || 0,
         })),
