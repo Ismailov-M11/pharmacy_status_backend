@@ -388,6 +388,7 @@ async function searchStock(req, res) {
         id: item.Slug,
         slug: item.Slug,
         name: item.Name,
+        imageUrl: item.ImageURI || null,
         address: item.Address || db.address_ru || null,
         landmark: item.Landmark || null,
         regionName: item.RegionName || db.parent_region_ru || null,
