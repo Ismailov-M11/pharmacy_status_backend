@@ -215,17 +215,24 @@ async function searchDrugCatalog(req, res) {
       });
     }
 
+    const drugRequestBody = {
+      searchText: searchText.trim(),
+      showOnlyExistOnStore: true,
+      onlyApprovedStores: true,
+      isOnlineStores: true,
+      regionList: [],
+      pageSize: 50,
+      page: 1,
+    };
+
+    console.log("[Medicine] drug-search → OSON request:", JSON.stringify({
+      url: `${OSON_API_BASE}/Product/Search`,
+      body: drugRequestBody,
+    }, null, 2));
+
     const response = await axios.post(
       `${OSON_API_BASE}/Product/Search`,
-      {
-        searchText: searchText.trim(),
-        showOnlyExistOnStore: true,
-        onlyApprovedStores: true,
-        isOnlineStores: true,
-        regionList: [],
-        pageSize: 50,
-        page: 1,
-      },
+      drugRequestBody,
       {
         headers: {
           accept: "application/json",
@@ -234,6 +241,8 @@ async function searchDrugCatalog(req, res) {
         timeout: 15000,
       }
     );
+
+    console.log("[Medicine] drug-search ← OSON status:", response.status, "| Succeeded:", response.data?.Succeeded, "| Items:", response.data?.Data?.Items?.length ?? 0);
 
     const items = (response.data?.Data?.Items || []).map((item) => ({
       id: item.Slug,
@@ -250,9 +259,14 @@ async function searchDrugCatalog(req, res) {
   } catch (error) {
     console.error("[Medicine] Drug search error:", error.message);
     if (error.response) {
-      return res.status(502).json({ error: "OSON API error: " + (error.response.statusText || "unknown") });
+      console.error("[Medicine] OSON drug-search response:", error.response.status, JSON.stringify(error.response.data));
+      return res.status(502).json({
+        error: "OSON API error",
+        status: error.response.status,
+        detail: error.response.data,
+      });
     }
-    res.status(500).json({ error: "Drug search failed" });
+    res.status(500).json({ error: "Drug search failed", detail: error.message });
   }
 }
 
@@ -298,20 +312,28 @@ async function searchStock(req, res) {
       quantity: Math.max(1, parseInt(d.quantity) || 1),
     }));
 
+    const stockRequestBody = {
+      productList,
+      regionList: [],
+      posSlugList,
+      latitude: null,
+      longitude: null,
+      maxDistance: 500000,
+      isOnline: true,
+      sortBy: "price",
+      pageSize: 100,
+      page: 1,
+    };
+
+    console.log("[Medicine] stock-search → OSON request:", JSON.stringify({
+      url: `${OSON_API_BASE}/Pos/ProductList`,
+      posSlugListCount: posSlugList.length,
+      productList,
+    }, null, 2));
+
     const response = await axios.post(
       `${OSON_API_BASE}/Pos/ProductList`,
-      {
-        productList,
-        regionList: [],
-        posSlugList,
-        latitude: null,
-        longitude: null,
-        maxDistance: 500000,
-        isOnline: true,
-        sortBy: "price",
-        pageSize: 100,
-        page: 1,
-      },
+      stockRequestBody,
       {
         headers: {
           accept: "application/json",
@@ -320,6 +342,8 @@ async function searchStock(req, res) {
         timeout: 30000,
       }
     );
+
+    console.log("[Medicine] stock-search ← OSON status:", response.status, "| Succeeded:", response.data?.Succeeded, "| Items:", response.data?.Data?.Items?.length ?? 0);
 
     const items = response.data?.Data?.Items || [];
 
@@ -361,9 +385,14 @@ async function searchStock(req, res) {
   } catch (error) {
     console.error("[Medicine] Stock search error:", error.message);
     if (error.response) {
-      return res.status(502).json({ error: "OSON API error: " + (error.response.statusText || "unknown") });
+      console.error("[Medicine] OSON stock-search response:", error.response.status, JSON.stringify(error.response.data));
+      return res.status(502).json({
+        error: "OSON API error",
+        status: error.response.status,
+        detail: error.response.data,
+      });
     }
-    res.status(500).json({ error: "Stock search failed" });
+    res.status(500).json({ error: "Stock search failed", detail: error.message });
   }
 }
 
