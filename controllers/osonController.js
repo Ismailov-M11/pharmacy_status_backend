@@ -384,6 +384,24 @@ async function searchStock(req, res) {
 
     const pharmacies = items.map((item) => {
       const db = pharmacyMap[item.Slug] || {};
+      const products = (item.ProductList || []).map((p) => {
+        const reqDrug = drugs.find((d) => d.id === p.Slug);
+        const qty = reqDrug ? Math.max(1, parseInt(reqDrug.quantity) || 1) : 1;
+        return {
+          id: p.Slug,
+          name: p.ProductName,
+          brand: p.BrandName || null,
+          manufacturer: p.ManufacturerName || null,
+          price: p.Price || 0,
+          expiration: p.ExpirationDate || null,
+          stock: p.Quantity || 0,
+          quantity: qty,
+          total: (p.Price || 0) * qty,
+        };
+      });
+      // Recalculate totalAmount from actual quantities (OSON's TotalAmount uses qty=1)
+      const totalAmount = products.reduce((sum, p) => sum + p.total, 0);
+
       return {
         id: item.Slug,
         slug: item.Slug,
@@ -393,27 +411,13 @@ async function searchStock(req, res) {
         landmark: item.Landmark || null,
         regionName: item.RegionName || db.parent_region_ru || null,
         distance: item.Distance || 0,
-        totalAmount: item.TotalAmount || 0,
+        totalAmount,
         latitude: db.latitude || null,
         longitude: db.longitude || null,
         phone: db.phone || null,
         openTime: db.open_time || null,
         closeTime: db.close_time || null,
-        products: (item.ProductList || []).map((p) => {
-          const reqDrug = drugs.find((d) => d.id === p.Slug);
-          const qty = reqDrug ? Math.max(1, parseInt(reqDrug.quantity) || 1) : 1;
-          return {
-            id: p.Slug,
-            name: p.ProductName,
-            brand: p.BrandName || null,
-            manufacturer: p.ManufacturerName || null,
-            price: p.Price || 0,
-            expiration: p.ExpirationDate || null,
-            stock: p.Quantity || 0,
-            quantity: qty,
-            total: (p.Price || 0) * qty,
-          };
-        }),
+        products,
       };
     });
 
