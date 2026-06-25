@@ -652,21 +652,29 @@ async function searchOrders(req, res) {
 async function imageProxy(req, res) {
   const { url } = req.query;
   if (!url) return res.status(400).end();
-  try {
-    const resp = await axios.get(url, {
-      responseType: "stream",
-      timeout: 8000,
-      headers: {
-        Authorization: `Bearer ${osonSyncService.getSavedToken()}`,
-        "User-Agent": "Mozilla/5.0",
-      },
-    });
-    res.setHeader("Content-Type", resp.headers["content-type"] || "image/jpeg");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    resp.data.pipe(res);
-  } catch {
-    res.status(404).end();
+
+  const attempts = [
+    // 1. with Bearer token
+    { headers: { Authorization: `Bearer ${osonSyncService.getSavedToken()}`, Accept: "image/*,*/*", "User-Agent": "Mozilla/5.0" } },
+    // 2. without auth (public CDN)
+    { headers: { Accept: "image/*,*/*", "User-Agent": "Mozilla/5.0" } },
+  ];
+
+  for (const { headers } of attempts) {
+    try {
+      const resp = await axios.get(url, { responseType: "stream", timeout: 8000, headers });
+      if (resp.status >= 200 && resp.status < 300) {
+        res.setHeader("Content-Type", resp.headers["content-type"] || "image/png");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        resp.data.pipe(res);
+        return;
+      }
+    } catch {
+      // try next
+    }
   }
+  res.status(404).end();
 }
 
 module.exports = {
