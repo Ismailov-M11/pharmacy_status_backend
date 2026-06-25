@@ -478,6 +478,65 @@ async function getPharmacyLocation(req, res) {
   }
 }
 
+const DAVO_API_BASE = "https://api.davodelivery.uz/api";
+
+/**
+ * POST /api/oson/medicine/order-search
+ * { searchKey: string, page?: number, size?: number }
+ * Proxies to Davo order/list and returns matching orders with items.
+ */
+async function searchOrders(req, res) {
+  const savedToken = osonSyncService.getSavedToken();
+  if (!savedToken) {
+    return res.status(503).json({ error: "OSON token not available. Please trigger a sync first." });
+  }
+
+  const { searchKey = "", page = 0, size = 10 } = req.body;
+
+  try {
+    const response = await axios.post(
+      `${DAVO_API_BASE}/order/list`,
+      { searchKey, page, size },
+      {
+        headers: {
+          accept: "*/*",
+          Authorization: `Bearer ${savedToken}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 15000,
+      }
+    );
+
+    const list = response.data?.payload?.list || [];
+    const total = response.data?.payload?.total || 0;
+
+    const orders = list.map((order) => ({
+      id: order.id,
+      code: order.code,
+      status: order.status,
+      customerPhone: order.customer?.phone || null,
+      marketName: order.market?.name || null,
+      creationDate: order.creationDate,
+      items: (order.items || []).map((item) => ({
+        slug: item.slug,
+        name: item.name,
+        manufacturer: item.manufacturer || null,
+        brand: item.brand || null,
+        imageUrl: item.imageUrl || null,
+        quantity: item.quantity || 1,
+        price: item.price || 0,
+      })),
+    }));
+
+    res.json({ orders, total });
+  } catch (error) {
+    const status = error.response?.status || 500;
+    const msg = error.response?.data?.message || error.message || "Order search failed";
+    console.error("[Medicine] searchOrders error:", msg);
+    res.status(status >= 400 && status < 600 ? status : 500).json({ error: msg });
+  }
+}
+
 module.exports = {
   getData,
   getStats,
@@ -488,4 +547,5 @@ module.exports = {
   searchDrugCatalog,
   searchStock,
   getPharmacyLocation,
+  searchOrders,
 };

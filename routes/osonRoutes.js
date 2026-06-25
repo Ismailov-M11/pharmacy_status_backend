@@ -30,4 +30,7 @@ router.post("/medicine/stock-search", osonController.searchStock);
 // GET /api/oson/medicine/pharmacy-location/:slug
 router.get("/medicine/pharmacy-location/:slug", osonController.getPharmacyLocation);
 
+// POST /api/oson/medicine/order-search  { searchKey, page?, size? }
+router.post("/medicine/order-search", osonController.searchOrders);
+
 module.exports = router;
