@@ -479,6 +479,72 @@ async function getPharmacyLocation(req, res) {
   }
 }
 
+/**
+ * POST /api/oson/medicine/drug-detail
+ * { slug: string, language?: "ru"|"uz" }
+ * Returns drug TileInfo + instructions in parallel.
+ */
+async function getDrugDetail(req, res) {
+  const savedToken = osonSyncService.getSavedToken();
+  if (!savedToken) {
+    return res.status(503).json({ error: "OSON token not available. Please trigger a sync first." });
+  }
+
+  const { slug, language = "ru" } = req.body;
+  if (!slug) return res.status(400).json({ error: "slug is required" });
+
+  const headers = { accept: "application/json", Authorization: `Bearer ${savedToken}` };
+
+  try {
+    const [tileRes, instrRes] = await Promise.allSettled([
+      axios.post(
+        `${OSON_API_BASE}/Product/TileInfo`,
+        { ProductSlugList: [slug], RegionList: [1, 2], ATCCode: null },
+        { headers, timeout: 10000 }
+      ),
+      axios.post(
+        `${OSON_API_BASE}/ProductInstruction/List`,
+        { ProductSlug: slug, Language: language },
+        { headers, timeout: 10000 }
+      ),
+    ]);
+
+    const tileItem = tileRes.status === "fulfilled"
+      ? (tileRes.value.data?.Data?.Items || [])[0] || null
+      : null;
+
+    const instructions = instrRes.status === "fulfilled"
+      ? (instrRes.value.data?.Data?.Items || [])
+      : [];
+
+    if (!tileItem) {
+      return res.status(404).json({ error: "Drug not found" });
+    }
+
+    res.json({
+      slug: tileItem.Slug,
+      name: tileItem.ProductName,
+      fullName: tileItem.ProductFullName || null,
+      brand: tileItem.BrandName || null,
+      manufacturer: tileItem.ManufacturerName || null,
+      atcCode: tileItem.AnatomicalTherapeuticChemicalCode || null,
+      atcName: tileItem.AnatomicalTherapeuticChemicalName || null,
+      imageUrl: tileItem.ImageURI || null,
+      minPrice: tileItem.MinPrice || null,
+      maxPrice: tileItem.MaxPrice || null,
+      byPrescription: tileItem.IsByPrescription || false,
+      instructions: instructions.map((i) => ({
+        order: i.OrderNumber,
+        title: i.Title,
+        description: i.Description,
+      })),
+    });
+  } catch (error) {
+    console.error("[Medicine] getDrugDetail error:", error.message);
+    res.status(500).json({ error: "Failed to load drug details" });
+  }
+}
+
 const DAVO_API_BASE = "https://api.davodelivery.uz/api";
 
 /**
@@ -593,5 +659,6 @@ module.exports = {
   searchDrugCatalog,
   searchStock,
   getPharmacyLocation,
+  getDrugDetail,
   searchOrders,
 };
