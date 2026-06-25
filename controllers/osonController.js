@@ -332,7 +332,7 @@ async function searchStock(req, res) {
           `${OSON_API_BASE}/Pos/ProductList`,
           {
             productList,
-            regionList: [1],
+            regionList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
             posSlugList: chunk,
             latitude: null,
             longitude: null,
