@@ -61,14 +61,15 @@ async function getData(req, res) {
  */
 async function getStats(req, res) {
   try {
-    const { parentRegion, region, search } = req.query;
-    const hasFilter = parentRegion || region || search;
+    const { parentRegion, region, search, inn } = req.query;
+    const hasFilter = parentRegion || region || search || inn;
 
     const stats = hasFilter
       ? await osonModel.getFilteredStats({
           parentRegion: parentRegion || null,
           region: region || null,
           search: search || null,
+          inn: inn || null,
         })
       : await osonModel.getSyncStats();
 
