@@ -1,7 +1,7 @@
 const db = require("../db");
 
 function buildFilterWhere(filters) {
-  const { status, parentRegion, region, search } = filters;
+  const { status, parentRegion, region, search, inn } = filters;
   let where = "WHERE 1=1";
   const params = [];
   let idx = 1;
@@ -44,6 +44,12 @@ function buildFilterWhere(filters) {
     idx++;
   }
 
+  if (inn) {
+    where += ` AND inn LIKE $${idx}`;
+    params.push(`%${inn.trim()}%`);
+    idx++;
+  }
+
   return { where, params, nextIdx: idx };
 }
 
@@ -52,7 +58,7 @@ const SELECT_COLS = `
   region_ru, region_uz, address_ru, address_uz, landmark_ru, landmark_uz,
   latitude::float, longitude::float, phone, open_time, close_time,
   has_delivery, is_verified, discount_percent::float, cashback_percent::float,
-  oson_status, last_synced_at, oson_synced_time, created_at
+  inn, oson_status, last_synced_at, oson_synced_time, created_at
 `;
 
 async function getAllOsonPharmacies(filters = {}) {
@@ -138,6 +144,7 @@ async function upsertPharmacy(slug, data, newStatus) {
     is_verified,
     discount_percent,
     cashback_percent,
+    inn,
     oson_synced_time,
   } = data;
 
@@ -147,11 +154,11 @@ async function upsertPharmacy(slug, data, newStatus) {
       region_ru, region_uz, address_ru, address_uz, landmark_ru, landmark_uz,
       latitude, longitude, phone, open_time, close_time,
       has_delivery, is_verified, discount_percent, cashback_percent,
-      oson_status, last_synced_at, created_at, oson_synced_time
+      inn, oson_status, last_synced_at, created_at, oson_synced_time
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
       $12, $13, $14, $15, $16, $17, $18, $19, $20,
-      $21, NOW(), NOW(), $22
+      $21, $22, NOW(), NOW(), $23
     )
     ON CONFLICT (slug) DO UPDATE SET
       name_ru = EXCLUDED.name_ru,
@@ -173,6 +180,7 @@ async function upsertPharmacy(slug, data, newStatus) {
       is_verified = EXCLUDED.is_verified,
       discount_percent = EXCLUDED.discount_percent,
       cashback_percent = EXCLUDED.cashback_percent,
+      inn = COALESCE(EXCLUDED.inn, oson_pharmacies.inn),
       oson_status = EXCLUDED.oson_status,
       oson_synced_time = COALESCE(EXCLUDED.oson_synced_time, oson_pharmacies.oson_synced_time),
       last_synced_at = NOW()
@@ -200,6 +208,7 @@ async function upsertPharmacy(slug, data, newStatus) {
     is_verified,
     discount_percent,
     cashback_percent,
+    inn || null,
     newStatus,
     oson_synced_time || null,
   ]);

@@ -16,7 +16,7 @@ const OSON_API_BASE = "https://dev-api.davodelivery.uz/api/oson";
  */
 async function getData(req, res) {
   try {
-    const { status, parentRegion, region, search, page, size } = req.query;
+    const { status, parentRegion, region, search, inn, page, size } = req.query;
 
     const pageNum = Math.max(0, parseInt(page) || 0);
     const sizeNum = parseInt(size);
@@ -28,6 +28,7 @@ async function getData(req, res) {
       parentRegion: parentRegion || null,
       region: region || null,
       search: search || null,
+      inn: inn || null,
     };
 
     let data, total;

@@ -249,6 +249,7 @@ async function runOsonSync(davoToken) {
                   is_verified: detail.IsVerified,
                   discount_percent: detail.DiscountPercent,
                   cashback_percent: detail.CashbackPercent,
+                  inn: detail.INN || null,
                   oson_synced_time: detail.SyncedTime || null,
                 },
                 newStatus
@@ -311,6 +312,7 @@ async function runOsonSync(davoToken) {
                   is_verified: detail.IsVerified,
                   discount_percent: detail.DiscountPercent,
                   cashback_percent: detail.CashbackPercent,
+                  inn: detail.INN || null,
                   oson_synced_time: detail.SyncedTime || null,
                 },
                 newStatus

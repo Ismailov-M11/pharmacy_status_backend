@@ -338,6 +338,11 @@ async function initializeDatabase() {
       ALTER TABLE oson_pharmacies ADD COLUMN IF NOT EXISTS oson_synced_time TIMESTAMP NULL;
     `);
 
+    // Add INN column (taxpayer identification number from OSON TileInfo)
+    await pool.query(`
+      ALTER TABLE oson_pharmacies ADD COLUMN IF NOT EXISTS inn VARCHAR(20) NULL;
+    `);
+
     // Seed: pharmacies that were connected in Davo but do NOT exist in OSON at all.
     // These must be marked as 'deleted'. Only insert if slug not already present;
     // if already present and NOT 'connected', set to 'deleted'.
